@@ -237,6 +237,22 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
             self.assertEqual(response.text, "fresh")
             self.assertNotIn("If-None-Match", request.call_args.args[0].header_items())
 
+    def test_http_cache_ignores_validators_when_cached_body_is_not_utf8(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            (Path(directory) / f"{key}.body").write_bytes(bytes([0xFF]))
+            (Path(directory) / f"{key}.json").write_text(json.dumps({
+                "url": url,
+                "fetched_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                "etag": '"old-validator"',
+            }), encoding="utf-8")
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"fresh")) as request:
+                response = cache.get(url, ttl_seconds=0)
+            self.assertEqual(response.text, "fresh")
+            self.assertNotIn("If-None-Match", request.call_args.args[0].header_items())
+
     def test_http_cache_opens_large_responses_from_disk_and_reuses_them(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             cache = HttpCache(Path(directory), timeout=1, retries=0)

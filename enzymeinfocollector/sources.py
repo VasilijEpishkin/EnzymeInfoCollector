@@ -142,16 +142,19 @@ class HttpCache:
         meta_path = self.directory / f"{key}.json"
         cached_meta: dict[str, Any] | None = None
         cached_age: float | None = None
+        cached_text = ""
         try:
             cached_meta = _read_cache_metadata(meta_path)
             body = body_path.read_bytes()
+            cached_text = body.decode("utf-8-sig")
             fetched_at = _cache_fetched_at(cached_meta)
             cached_age = max(0, (datetime.now(timezone.utc) - fetched_at).total_seconds())
             if not refresh and cached_age <= ttl_seconds:
-                return CachedResponse(body.decode("utf-8-sig"), {**cached_meta, "cached": True, "stale": False})
+                return CachedResponse(cached_text, {**cached_meta, "cached": True, "stale": False})
         except (OSError, ValueError, KeyError, UnicodeDecodeError):
             cached_meta = None
             body = b""
+            cached_text = ""
 
         headers = {"User-Agent": self.user_agent, "Accept": "text/plain, text/tab-separated-values, */*"}
         if cached_meta:
@@ -171,7 +174,7 @@ class HttpCache:
                 if error.code == 304 and body and cached_meta:
                     cached_meta["fetched_at"] = utc_now()
                     _atomic_write(meta_path, json.dumps(cached_meta, sort_keys=True).encode("utf-8"))
-                    return CachedResponse(body.decode("utf-8-sig"), {**cached_meta, "cached": True, "stale": False})
+                    return CachedResponse(cached_text, {**cached_meta, "cached": True, "stale": False})
                 last_error = error
                 retry_after = error.headers.get("Retry-After")
                 transient_failure = error.code in {429, 500, 502, 503, 504}
@@ -205,7 +208,7 @@ class HttpCache:
             time.sleep(delay)
 
         if body and cached_meta and transient_failure and cached_age is not None and cached_age <= 30 * 24 * 60 * 60:
-            return CachedResponse(body.decode("utf-8-sig"), {**cached_meta, "cached": True, "stale": True, "warning": str(last_error)})
+            return CachedResponse(cached_text, {**cached_meta, "cached": True, "stale": True, "warning": str(last_error)})
         raise DataSourceError(f"Request failed for {urllib.parse.urlparse(url).netloc}: {last_error}") from last_error
 
     @contextmanager
