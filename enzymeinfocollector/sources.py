@@ -109,6 +109,13 @@ def _atomic_write(path: Path, content: bytes) -> None:
         temp.unlink(missing_ok=True)
 
 
+def _read_cache_metadata(path: Path) -> dict[str, Any]:
+    metadata = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(metadata, dict) or not isinstance(metadata.get("fetched_at"), str):
+        raise ValueError("Invalid cache metadata")
+    return metadata
+
+
 class HttpCache:
     def __init__(self, directory: Path, contact_email: str | None = None, timeout: float = 30.0, retries: int = 3):
         self.directory = directory
@@ -129,13 +136,14 @@ class HttpCache:
         cached_meta: dict[str, Any] | None = None
         cached_age: float | None = None
         try:
-            cached_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            cached_meta = _read_cache_metadata(meta_path)
             body = body_path.read_bytes()
             fetched_at = datetime.fromisoformat(cached_meta["fetched_at"].replace("Z", "+00:00"))
             cached_age = max(0, (datetime.now(timezone.utc) - fetched_at).total_seconds())
             if not refresh and cached_age <= ttl_seconds:
                 return CachedResponse(body.decode("utf-8-sig"), {**cached_meta, "cached": True, "stale": False})
         except (OSError, ValueError, KeyError, UnicodeDecodeError):
+            cached_meta = None
             body = b""
 
         headers = {"User-Agent": self.user_agent, "Accept": "text/plain, text/tab-separated-values, */*"}
@@ -210,7 +218,7 @@ class HttpCache:
         cached_age: float | None = None
         fresh_cache = False
         try:
-            cached_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            cached_meta = _read_cache_metadata(meta_path)
             fetched_at = datetime.fromisoformat(cached_meta["fetched_at"].replace("Z", "+00:00"))
             cached_age = max(0, (datetime.now(timezone.utc) - fetched_at).total_seconds())
             if body_path.stat().st_size > MAX_RESPONSE_BYTES:

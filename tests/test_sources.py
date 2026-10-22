@@ -4,6 +4,7 @@ import io
 import hashlib
 import json
 import multiprocessing
+import os
 import threading
 import tempfile
 import time
@@ -200,6 +201,32 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
                         cache.get("https://example.org/data", ttl_seconds=3600)
             self.assertEqual(request.call_count, 1)
 
+    def test_http_cache_refreshes_when_valid_json_metadata_has_wrong_shape(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            (Path(directory) / f"{key}.body").write_bytes(b"old")
+            (Path(directory) / f"{key}.json").write_text("[]", encoding="utf-8")
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"fresh")):
+                response = cache.get(url, ttl_seconds=3600)
+            self.assertEqual(response.text, "fresh")
+            self.assertEqual(json.loads((Path(directory) / f"{key}.json").read_text())["url"], url)
+
+    def test_http_cache_ignores_validators_when_cached_timestamp_is_invalid(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            (Path(directory) / f"{key}.body").write_bytes(b"old")
+            (Path(directory) / f"{key}.json").write_text(
+                '{"fetched_at": "not-a-date", "etag": "old-validator"}', encoding="utf-8"
+            )
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"fresh")) as request:
+                response = cache.get(url, ttl_seconds=3600)
+            self.assertEqual(response.text, "fresh")
+            self.assertNotIn("If-None-Match", request.call_args.args[0].header_items())
+
     def test_http_cache_opens_large_responses_from_disk_and_reuses_them(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             cache = HttpCache(Path(directory), timeout=1, retries=0)
@@ -222,6 +249,18 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
                 with cache.open_text("https://example.org/data", ttl_seconds=0) as (stream, metadata):
                     self.assertEqual(stream.read(), "release 1")
                     self.assertTrue(metadata["stale"])
+
+    def test_http_cache_stream_refreshes_when_fetched_at_has_wrong_type(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            (Path(directory) / f"{key}.body").write_bytes(b"old")
+            (Path(directory) / f"{key}.json").write_text('{"fetched_at": 42}', encoding="utf-8")
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"fresh")):
+                with cache.open_text(url, ttl_seconds=3600) as (stream, metadata):
+                    self.assertEqual(stream.read(), "fresh")
+                    self.assertFalse(metadata["cached"])
 
     def test_http_cache_stream_rejects_oversized_body_without_publishing_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -329,10 +368,9 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
             self.assertEqual(set(bodies), {"body-1", "body-2"})
             self.assertEqual(metadata["etag"], f'"{body.removeprefix("body-")}"')
 
-    @unittest.skipUnless("fork" in multiprocessing.get_all_start_methods(), "POSIX process lock check")
     def test_http_cache_lock_serializes_separate_processes(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            context = multiprocessing.get_context("fork")
+            context = multiprocessing.get_context("spawn")
             holder_entered = context.Event()
             contender_attempted = context.Event()
             contender_entered = context.Event()
@@ -369,6 +407,9 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
                 self.assertEqual(process.exitcode, 0)
             self.assertTrue(contender_was_blocked)
             self.assertEqual(maximum.value, 1)
+            if os.name == "nt":
+                lock_file = next(Path(directory).glob("*.lock"))
+                self.assertGreaterEqual(lock_file.stat().st_size, 1)
 
     def test_uniprot_merge_bounds_open_runs_and_keeps_accession_order(self) -> None:
         cache = FakeCache("Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed\tSequence\n" + "".join(
