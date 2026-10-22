@@ -13,7 +13,7 @@ import io
 from pathlib import Path
 from unittest.mock import patch
 
-from enzymeinfocollector.cli import _read_query_file, _read_request_manifest, main, write_output, write_stream_json_output, write_stream_output
+from enzymeinfocollector.cli import _queries_from_rows, _read_query_file, _read_request_manifest, main, write_output, write_stream_json_output, write_stream_output
 from enzymeinfocollector.collector import EnzymeCollector
 from enzymeinfocollector import sources
 from enzymeinfocollector.sources import CachedResponse
@@ -155,6 +155,17 @@ class CliTests(unittest.TestCase):
             path = Path(directory) / "enzymes.csv"
             path.write_text("Protein\nAlcohol dehydrogenase\n", encoding="utf-8")
             self.assertEqual(_read_query_file(path), [("enzyme", "Alcohol dehydrogenase")])
+
+    def test_input_rows_are_validated_before_reading_the_rest(self) -> None:
+        self.assertEqual(_queries_from_rows([]), [])
+        self.assertEqual(_queries_from_rows(iter([("Protein",)])), [])
+
+        def rows():
+            yield ("unrecognized column",)
+            raise AssertionError("body rows should not be read after an invalid header")
+
+        with self.assertRaisesRegex(ValueError, "needs a Protein/Enzyme or EC/EC number column"):
+            _queries_from_rows(rows())
 
     @unittest.skipUnless(importlib.util.find_spec("openpyxl"), "openpyxl is an optional XLSX extra")
     def test_reads_xlsx_input(self) -> None:

@@ -11,7 +11,7 @@ import sys
 import tempfile
 import zipfile
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from .collector import EnzymeCollector
 from .sources import DataSourceError, HttpCache, default_cache_dir, validate_ec_number
@@ -149,13 +149,13 @@ def _read_query_file(path: Path | None) -> list[tuple[str, str]]:
             raise ValueError(f"Could not read Excel workbook {path}: {error}") from error
         try:
             rows = workbook.active.iter_rows(values_only=True)
-            return _queries_from_rows(list(rows))
+            return _queries_from_rows(rows)
         finally:
             workbook.close()
     if suffix in {".csv", ".tsv"}:
         delimiter = "\t" if suffix == ".tsv" else ","
         with path.open("r", encoding="utf-8-sig", newline="") as stream:
-            return _queries_from_rows(list(csv.reader(stream, delimiter=delimiter)))
+            return _queries_from_rows(csv.reader(stream, delimiter=delimiter))
     if suffix == ".txt":
         with path.open("r", encoding="utf-8-sig") as stream:
             values = [line.strip() for line in stream if line.strip() and not line.lstrip().startswith("#")]
@@ -163,16 +163,18 @@ def _read_query_file(path: Path | None) -> list[tuple[str, str]]:
     raise ValueError("Input file must have .csv, .tsv, .txt, or .xlsx extension")
 
 
-def _queries_from_rows(rows: list[tuple[Any, ...]] | list[list[Any]]) -> list[tuple[str, str]]:
-    if not rows:
+def _queries_from_rows(rows: Iterable[tuple[Any, ...] | list[Any]]) -> list[tuple[str, str]]:
+    rows = iter(rows)
+    first_row = next(rows, None)
+    if first_row is None:
         return []
-    header = [str(value or "").strip().casefold() for value in rows[0]]
+    header = [str(value or "").strip().casefold() for value in first_row]
     enzyme_columns = [index for index, name in enumerate(header) if name in {"protein", "enzyme", "enzyme name", "protein name"}]
     ec_columns = [index for index, name in enumerate(header) if name in {"ec", "ec number", "ec_number"}]
     if not enzyme_columns and not ec_columns:
         raise ValueError("Input table needs a Protein/Enzyme or EC/EC number column")
     queries = []
-    for row in rows[1:]:
+    for row in rows:
         for index in enzyme_columns:
             value = _cell(row, index)
             if value:
