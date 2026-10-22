@@ -13,7 +13,7 @@ import io
 from pathlib import Path
 from unittest.mock import patch
 
-from enzymeinfocollector.cli import _read_query_file, _read_request_manifest, main, write_output, write_stream_output
+from enzymeinfocollector.cli import _read_query_file, _read_request_manifest, main, write_output, write_stream_json_output, write_stream_output
 from enzymeinfocollector.collector import EnzymeCollector
 from enzymeinfocollector import sources
 from enzymeinfocollector.sources import CachedResponse
@@ -326,6 +326,98 @@ DE   Terminal enzyme.
             with Path(directory, "legacy.csv").open(encoding="utf-8", newline="") as stream:
                 rows = list(csv.DictReader(stream))
         self.assertEqual([row["input_value"] for row in rows], [queries[0][1]] * 2 + [queries[1][1]] * 2)
+
+    def test_streamed_json_matches_eager_json_for_all_query_shapes(self) -> None:
+        branched = """ID   7.9.9.9
+DE   Transferred entry: 7.9.9.1 and 7.9.9.2 and 7.9.9.3 and 7.9.9.4.
+//
+ID   7.9.9.1
+DE   Transferred entry: 7.9.9.5.
+//
+ID   7.9.9.2
+DE   Transferred entry: 7.9.9.5.
+//
+ID   7.9.9.3
+DE   Deleted entry.
+//
+ID   7.9.9.5
+DE   Terminal enzyme.
+//
+"""
+        cyclic = """ID   7.9.9.9
+DE   Transferred entry: 7.9.9.1.
+//
+ID   7.9.9.1
+DE   Transferred entry: 7.9.9.9.
+//
+"""
+        scenarios = [
+            ("active-repeat", lambda: EnzymeCollector(PipelineCache()), [("ec", "1.1.1.1"), ("ec", "1.1.1.1")]),
+            ("alias-name", lambda: EnzymeCollector(AliasPipelineCache()), [("enzyme", "Alcohol:NAD+ oxidoreductase")]),
+            ("not-found", lambda: EnzymeCollector(PipelineCache()), [("enzyme", "No such enzyme")]),
+            ("missing-expasy-with-protein", lambda: EnzymeCollector(MissingExpasyCache(secondary_hits=True)), [("ec", "2.2.2.2")]),
+            ("missing-expasy-empty", lambda: EnzymeCollector(MissingExpasyCache(secondary_hits=False)), [("ec", "2.2.2.2")]),
+            ("without-sequences", lambda: EnzymeCollector(PipelineCache(), include_sequences=False), [("ec", "1.1.1.1")]),
+            ("branched-duplicate-terminal-and-unresolved", lambda: EnzymeCollector(TransferCache(branched)), [("ec", "7.9.9.9")]),
+            ("cyclic-transfer", lambda: EnzymeCollector(TransferCache(cyclic)), [("ec", "7.9.9.9")]),
+        ]
+        for name, collector_factory, queries in scenarios:
+            with self.subTest(scenario=name), tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                eager_path, streamed_path = root / "eager.json", root / "streamed.json"
+                with patch("enzymeinfocollector.collector.utc_now", return_value="2026-10-23T00:00:00Z"):
+                    eager_payload = collector_factory().collect(queries)
+                    write_output(eager_path, "json", eager_payload)
+                    write_stream_json_output(streamed_path, collector_factory(), queries)
+                self.assertEqual(streamed_path.read_bytes(), eager_path.read_bytes())
+
+    def test_streamed_json_preserves_destination_on_collection_and_write_failure(self) -> None:
+        class BrokenCache:
+            def get(self, *_args: object, **_kwargs: object) -> CachedResponse:
+                raise OSError("source unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            path.write_bytes(b"previous output\n")
+            with self.assertRaisesRegex(OSError, "source unavailable"):
+                write_stream_json_output(path, EnzymeCollector(BrokenCache()), [("ec", "1.1.1.1")])  # type: ignore[arg-type]
+            self.assertEqual(path.read_bytes(), b"previous output\n")
+            self.assertEqual(list(Path(directory).glob(".result.json.*.tmp")), [])
+            self.assertEqual(list(Path(directory).glob(".result.json.spool.*")), [])
+
+            with patch("enzymeinfocollector.cli._dump_json_with_protein_spool", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    write_stream_json_output(path, EnzymeCollector(PipelineCache()), [("ec", "1.1.1.1")])  # type: ignore[arg-type]
+            self.assertEqual(path.read_bytes(), b"previous output\n")
+            self.assertEqual(list(Path(directory).glob(".result.json.*.tmp")), [])
+            self.assertEqual(list(Path(directory).glob(".result.json.spool.*")), [])
+
+    def test_cli_routes_json_exports_through_streaming_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            with patch("enzymeinfocollector.cli.HttpCache", return_value=PipelineCache()), patch(
+                "enzymeinfocollector.cli.write_stream_json_output", wraps=write_stream_json_output,
+            ) as writer:
+                self.assertEqual(main(["--ec", "1.1.1.1", "--output", str(path), "--stream-json"]), 0)
+            writer.assert_called_once()
+            saved = json.loads(path.read_text(encoding="utf-8"))
+        self.assertEqual(saved["results"][0]["enzymes"][0]["proteins"][0]["accession"], "P00330")
+
+    def test_cli_keeps_default_json_eager_and_rejects_stream_json_for_csv(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.json"
+            with patch("enzymeinfocollector.cli.HttpCache", return_value=PipelineCache()), patch(
+                "enzymeinfocollector.cli.write_stream_json_output", wraps=write_stream_json_output,
+            ) as writer:
+                self.assertEqual(main(["--ec", "1.1.1.1", "--output", str(path)]), 0)
+            writer.assert_not_called()
+
+        errors = io.StringIO()
+        with redirect_stderr(errors):
+            with self.assertRaises(SystemExit) as raised:
+                main(["--ec", "1.1.1.1", "--format", "csv", "--stream-json"])
+        self.assertEqual(raised.exception.code, 2)
+        self.assertIn("--stream-json requires JSON output", errors.getvalue())
 
     def test_direct_alias_results_are_isolated_and_collector_cache_is_scoped(self) -> None:
         queries = [

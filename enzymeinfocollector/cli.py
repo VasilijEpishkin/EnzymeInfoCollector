@@ -32,6 +32,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", "-o", type=Path, default=Path("enzyme_results.json"), help="Output file (default: enzyme_results.json)")
     parser.add_argument("--save-manifest", type=Path, help="Atomically save the normalized queries and collection filters as JSON")
     parser.add_argument("--format", choices=("auto", "json", "csv", "fasta"), default="auto", help="Output format; auto uses the output extension")
+    parser.add_argument("--stream-json", action="store_true", help="Reduce memory use for JSON output at the cost of extra disk I/O")
     parser.add_argument("--cache-dir", type=Path, default=default_cache_dir(), help="HTTP cache directory")
     parser.add_argument("--contact-email", default=os.environ.get("ENZYMEINFOCOLLECTOR_EMAIL"), help="Contact email added to upstream User-Agent headers")
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout in seconds (default: 30)")
@@ -264,6 +265,125 @@ def write_stream_output(path: Path, output_format: str, collector: EnzymeCollect
         temp_path.unlink(missing_ok=True)
 
 
+def write_stream_json_output(path: Path, collector: EnzymeCollector, queries: list[tuple[str, str]]) -> dict[str, Any]:
+    """Write JSON without retaining streamed protein records in memory."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(prefix=f".{path.name}.spool.", dir=path.parent) as spool_directory:
+        spool_path = Path(spool_directory) / "proteins.jsonl"
+        protein_ranges: dict[int, list[tuple[int, int]]] = {}
+        with spool_path.open("wb") as spool:
+            current_record_id: int | None = None
+            current_start = 0
+            current_count = 0
+
+            def finish_record() -> None:
+                nonlocal current_record_id, current_count
+                if current_record_id is not None:
+                    protein_ranges.setdefault(current_record_id, []).append((current_start, current_count))
+                    current_record_id = None
+                    current_count = 0
+
+            def spool_record(
+                _result: dict[str, Any],
+                record: dict[str, Any] | None,
+                protein: dict[str, Any] | None,
+                _record_kind: str,
+                _requested_ec: str,
+                _resolution: dict[str, Any] | None,
+            ) -> None:
+                nonlocal current_record_id, current_start, current_count
+                if record is None:
+                    finish_record()
+                    return
+                record_id = id(record)
+                if current_record_id != record_id:
+                    finish_record()
+                    current_record_id = record_id
+                    current_start = spool.tell()
+                    protein_ranges.setdefault(record_id, [])
+                if protein is not None:
+                    spool.write(json.dumps(protein, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+                    spool.write(b"\n")
+                    current_count += 1
+
+            payload = collector.collect(queries, on_record=spool_record)
+            finish_record()
+
+        descriptor, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+        os.close(descriptor)
+        temp_path = Path(temp_name)
+        try:
+            with temp_path.open("w", encoding="utf-8", newline="\n") as stream, spool_path.open("rb") as spool:
+                _dump_json_with_protein_spool(payload, stream, spool, protein_ranges)
+                stream.write("\n")
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.replace(temp_path, path)
+        finally:
+            temp_path.unlink(missing_ok=True)
+    return payload
+
+
+def _dump_json_with_protein_spool(
+    value: Any,
+    stream: Any,
+    spool: Any,
+    protein_ranges: dict[int, list[tuple[int, int]]],
+    level: int = 0,
+) -> None:
+    if isinstance(value, dict):
+        if not value:
+            stream.write("{}")
+            return
+        stream.write("{\n")
+        for index, (key, item) in enumerate(value.items()):
+            stream.write("  " * (level + 1))
+            json.dump(key, stream, ensure_ascii=False)
+            stream.write(": ")
+            if key == "proteins" and id(value) in protein_ranges:
+                _write_spooled_proteins(stream, spool, protein_ranges[id(value)], protein_ranges, level + 1)
+            else:
+                _dump_json_with_protein_spool(item, stream, spool, protein_ranges, level + 1)
+            stream.write(",\n" if index + 1 < len(value) else "\n")
+        stream.write("  " * level + "}")
+    elif isinstance(value, (list, tuple)):
+        if not value:
+            stream.write("[]")
+            return
+        stream.write("[\n")
+        for index, item in enumerate(value):
+            stream.write("  " * (level + 1))
+            _dump_json_with_protein_spool(item, stream, spool, protein_ranges, level + 1)
+            stream.write(",\n" if index + 1 < len(value) else "\n")
+        stream.write("  " * level + "]")
+    else:
+        json.dump(value, stream, ensure_ascii=False)
+
+
+def _write_spooled_proteins(
+    stream: Any,
+    spool: Any,
+    ranges: list[tuple[int, int]],
+    protein_ranges: dict[int, list[tuple[int, int]]],
+    level: int,
+) -> None:
+    protein_count = sum(count for _, count in ranges)
+    if not protein_count:
+        stream.write("[]")
+        return
+    stream.write("[\n")
+    written = 0
+    for start, count in ranges:
+        spool.seek(start)
+        for _ in range(count):
+            protein = json.loads(spool.readline())
+            stream.write("  " * (level + 1))
+            _dump_json_with_protein_spool(protein, stream, spool, protein_ranges, level + 1)
+            written += 1
+            stream.write(",\n" if written < protein_count else "\n")
+    stream.write("  " * level + "]")
+
+
 def _select_format(path: Path, output_format: str) -> str:
     if output_format != "auto":
         return output_format
@@ -379,7 +499,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s: %(message)s")
     if args.command == "cache":
-        if args.enzyme or args.ec or args.file or args.replay_manifest or args.save_manifest:
+        if args.enzyme or args.ec or args.file or args.replay_manifest or args.save_manifest or args.stream_json:
             parser.error("cache maintenance cannot be combined with collection inputs")
         try:
             cache = HttpCache(args.cache_dir)
@@ -415,6 +535,9 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("one of --enzyme, --ec, --file, or --replay-manifest is required")
     if args.timeout <= 0 or args.retries < 0:
         parser.error("--timeout must be positive and --retries must be non-negative")
+    selected_format = _select_format(args.output, args.format)
+    if args.stream_json and selected_format != "json":
+        parser.error("--stream-json requires JSON output; CSV and FASTA are already streamed")
     try:
         if args.replay_manifest:
             queries, manifest_options = _read_request_manifest(args.replay_manifest)
@@ -459,8 +582,10 @@ def main(argv: list[str] | None = None) -> int:
             reviewed_only=reviewed_only,
             taxon_ids=taxon_ids,
         )
-        if _select_format(args.output, args.format) in {"csv", "fasta"}:
+        if selected_format in {"csv", "fasta"}:
             payload = write_stream_output(args.output, args.format, collector, queries)
+        elif args.stream_json:
+            payload = write_stream_json_output(args.output, collector, queries)
         else:
             payload = collector.collect(queries)
             write_output(args.output, args.format, payload)
