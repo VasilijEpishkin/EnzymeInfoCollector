@@ -63,7 +63,8 @@ class EnzymeCollector:
         for query_type, raw_value in queries:
             if query_type == "ec":
                 value = validate_ec_number(raw_value)
-                matches = [item for item in self._enzyme_entries or [] if item["ec_number"].casefold() == value.casefold()]
+                match = (self._enzyme_index or {}).get(value.casefold())
+                matches = [match] if match else []
                 if not matches:
                     matches = [{
                         "ec_number": value,
