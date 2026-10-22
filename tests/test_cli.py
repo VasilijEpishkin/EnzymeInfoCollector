@@ -327,6 +327,62 @@ DE   Terminal enzyme.
                 rows = list(csv.DictReader(stream))
         self.assertEqual([row["input_value"] for row in rows], [queries[0][1]] * 2 + [queries[1][1]] * 2)
 
+    def test_direct_alias_results_are_isolated_and_collector_cache_is_scoped(self) -> None:
+        queries = [
+            ("enzyme", "Alcohol dehydrogenase"),
+            ("enzyme", "Alcohol:NAD+ oxidoreductase"),
+        ]
+        cache = AliasPipelineCache()
+        collector = EnzymeCollector(cache)  # type: ignore[arg-type]
+        payload = collector.collect(queries)
+        first = payload["results"][0]["enzymes"][0]
+        second = payload["results"][1]["enzymes"][0]
+        self.assertEqual(first, second)
+        self.assertIsNot(first, second)
+        self.assertIsNot(first["proteins"], second["proteins"])
+        self.assertIsNot(first["proteins"][0], second["proteins"][0])
+        first["proteins"][0]["sequence"] = "mutated"
+        first["reactions"][0]["equation"] = "mutated"
+        first["alternative_names"].append("mutated")
+        self.assertEqual(second["proteins"][0]["sequence"], "MSTAGKVIKCK")
+        self.assertEqual(second["reactions"][0]["equation"], "A = B")
+        self.assertEqual(second["alternative_names"], ["Alcohol:NAD+ oxidoreductase"])
+        self.assertEqual(sum("uniprotkb/stream" in url for url in cache.urls), 1)
+        self.assertEqual(collector._active_results, {})
+
+        later = collector.collect([("enzyme", "Alcohol:NAD+ oxidoreductase")])
+        later_record = later["results"][0]["enzymes"][0]
+        self.assertEqual(later_record["proteins"][0]["sequence"], "MSTAGKVIKCK")
+        self.assertEqual(later_record["reactions"][0]["equation"], "A = B")
+        self.assertEqual(later_record["alternative_names"], ["Alcohol:NAD+ oxidoreductase"])
+
+    def test_direct_transfer_results_isolate_shared_terminal_ec(self) -> None:
+        entries = """ID   7.9.9.9
+DE   Transferred entry: 7.9.9.5.
+//
+ID   7.9.9.8
+DE   Transferred entry: 7.9.9.5.
+//
+ID   7.9.9.5
+DE   Terminal enzyme.
+//
+"""
+        cache = TransferCache(entries)
+        payload = EnzymeCollector(cache).collect([
+            ("ec", "7.9.9.9"), ("ec", "7.9.9.8"), ("ec", "7.9.9.5"),
+        ])  # type: ignore[arg-type]
+        first = payload["results"][0]["enzymes"][0]["resolution"]["resolved_enzymes"][0]
+        second = payload["results"][1]["enzymes"][0]["resolution"]["resolved_enzymes"][0]
+        explicit = payload["results"][2]["enzymes"][0]
+        self.assertEqual(first["ec_number"], second["ec_number"])
+        self.assertEqual(first["ec_number"], explicit["ec_number"])
+        self.assertIsNot(first["proteins"][0], second["proteins"][0])
+        self.assertIsNot(second["proteins"][0], explicit["proteins"][0])
+        first["proteins"][0]["sequence"] = "mutated"
+        self.assertEqual(second["proteins"][0]["sequence"], "MSTAGKVIKCK")
+        self.assertEqual(explicit["proteins"][0]["sequence"], "MSTAGKVIKCK")
+        self.assertEqual(sum("uniprotkb/stream" in url for url in cache.urls), 1)
+
     def test_reused_reaction_metadata_is_isolated_from_callback_mutation(self) -> None:
         queries = [("enzyme", "Alcohol dehydrogenase"), ("enzyme", "Alcohol:NAD+ oxidoreductase")]
         second_query_equations = []

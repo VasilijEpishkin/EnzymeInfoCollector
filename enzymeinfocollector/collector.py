@@ -70,10 +70,14 @@ class EnzymeCollector:
     ) -> dict[str, Any]:
         """Collect results; callback mode streams proteins and returns metadata-only enzyme records."""
         queries = list(queries)
-        if on_record is None:
-            return self._collect(queries)
-        with TemporaryDirectory(prefix="enzymeinfocollector-collect-") as directory:
-            return self._collect(queries, on_record, Path(directory), {}, {})
+        self._active_results.clear()
+        try:
+            if on_record is None:
+                return self._collect(queries)
+            with TemporaryDirectory(prefix="enzymeinfocollector-collect-") as directory:
+                return self._collect(queries, on_record, Path(directory), {}, {})
+        finally:
+            self._active_results.clear()
 
     def _collect(
         self,
@@ -231,7 +235,8 @@ class EnzymeCollector:
 
     def _collect_active_enzyme(self, enzyme: dict[str, Any]) -> dict[str, Any]:
         ec_number = enzyme["ec_number"]
-        if ec_number.casefold() not in self._active_results:
+        cache_key = ec_number.casefold()
+        if cache_key not in self._active_results:
             proteins, protein_source = fetch_uniprot(
                 ec_number,
                 self.cache,
@@ -253,10 +258,11 @@ class EnzymeCollector:
                     for direction, identifier in directed_ids.items()
                     if identifier in smiles_by_id
                 }
-            self._active_results[ec_number.casefold()] = self._enzyme_result(
+            self._active_results[cache_key] = self._enzyme_result(
                 enzyme, proteins, reactions, protein_source, reaction_source
             )
-        return self._active_results[ec_number.casefold()]
+            return self._active_results[cache_key]
+        return deepcopy(self._active_results[cache_key])
 
     def _stream_active_enzyme(
         self,
@@ -403,7 +409,7 @@ class EnzymeCollector:
         reaction_source: dict[str, Any] | None,
     ) -> dict[str, Any]:
         return {
-            **enzyme,
+            **deepcopy(enzyme),
             "proteins": proteins,
             "reactions": reactions,
             "provenance": {
