@@ -70,7 +70,12 @@ class EnzymeCollector:
         *,
         on_record: Callable[[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
-        """Collect results; callback mode streams proteins and returns metadata-only enzyme records."""
+        """Collect results; callback mode streams proteins and returns metadata-only enzyme records.
+
+        Treat callback arguments as borrowed, read-only views valid only during the callback.
+        Query results and enzyme records may be reused, and transfer resolution is updated
+        as target records arrive. Copy values that must be retained or modified.
+        """
         queries = list(queries)
         self._enzyme_entries = None
         self._enzyme_index = None
