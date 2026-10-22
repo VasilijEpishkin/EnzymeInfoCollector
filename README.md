@@ -83,6 +83,8 @@ enzymeinfocollector --ec 1.1.1.1 --contact-email researcher@example.org --timeou
 
 Concurrent processes coordinate cache reads and refreshes per URL, so they cannot mix a response body with another request's metadata. Small `.lock` sidecar files are retained in the cache directory.
 
+For the Python API, use a separate `EnzymeCollector` instance for each concurrent collection. An instance is not thread-safe; the shared HTTP cache itself coordinates concurrent access across processes. Source snapshots are loaded per `collect()` call, and the HTTP cache applies its TTL between calls; with `refresh=True`, each call requests an upstream refresh (a recent cached response may still be used after a transient failure).
+
 Inspect cache size without displaying query URLs, or preview removal of entries older than the 30-day stale-response window:
 
 ```bash

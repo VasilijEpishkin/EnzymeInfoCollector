@@ -383,6 +383,76 @@ DE   Terminal enzyme.
         self.assertEqual(explicit["proteins"][0]["sequence"], "MSTAGKVIKCK")
         self.assertEqual(sum("uniprotkb/stream" in url for url in cache.urls), 1)
 
+    def test_refresh_reloads_source_snapshots_between_collect_calls(self) -> None:
+        class ChangingCatalogCache:
+            def __init__(self) -> None:
+                self.catalog_reads = 0
+                self.refresh_values: list[bool] = []
+
+            def get(self, url: str, **kwargs: object) -> CachedResponse:
+                if url != sources.ENZYME_URL:
+                    raise AssertionError(f"Unexpected URL {url}")
+                self.catalog_reads += 1
+                self.refresh_values.append(bool(kwargs.get("refresh")))
+                name = "Original enzyme" if self.catalog_reads == 1 else "Refreshed enzyme"
+                body = f"ID   1.1.1.1\nDE   {name}.\n//\n"
+                return CachedResponse(body, {"url": f"{url}?snapshot={self.catalog_reads}", "fetched_at": f"snapshot-{self.catalog_reads}"})
+
+        cache = ChangingCatalogCache()
+        collector = EnzymeCollector(cache, refresh=True)  # type: ignore[arg-type]
+        uniprot_sources = iter([
+            {"url": "https://example.org/uniprot-v1"},
+            {"url": "https://example.org/uniprot-v2"},
+        ])
+        rhea_sources = iter([
+            {"url": "https://example.org/rhea-v1"},
+            {"url": "https://example.org/rhea-v2"},
+        ])
+        smiles = iter([
+            ({"10000": "C>>O"}, {"url": "https://example.org/smiles-v1"}),
+            ({"10000": "N>>O"}, {"url": "https://example.org/smiles-v2"}),
+        ])
+        directions = iter([
+            ({}, {"url": "https://example.org/directions-v1"}),
+            ({}, {"url": "https://example.org/directions-v2"}),
+        ])
+
+        with patch(
+            "enzymeinfocollector.collector.fetch_uniprot",
+            side_effect=lambda *_args, **_kwargs: ([], next(uniprot_sources)),
+        ) as uniprot, patch(
+            "enzymeinfocollector.collector.fetch_rhea",
+            side_effect=lambda *_args, **_kwargs: ([{"rhea_id": "10000"}], next(rhea_sources)),
+        ) as rhea, patch(
+            "enzymeinfocollector.collector.fetch_reaction_smiles", side_effect=lambda *_args, **_kwargs: next(smiles),
+        ) as smiles_fetch, patch(
+            "enzymeinfocollector.collector.fetch_reaction_directions", side_effect=lambda *_args, **_kwargs: next(directions),
+        ) as directions_fetch:
+            first = collector.collect([("ec", "1.1.1.1")])
+            second = collector.collect([("ec", "1.1.1.1")])
+
+        first_record = first["results"][0]["enzymes"][0]
+        second_record = second["results"][0]["enzymes"][0]
+        self.assertEqual(first_record["enzyme_name"], "Original enzyme")
+        self.assertEqual(second_record["enzyme_name"], "Refreshed enzyme")
+        self.assertEqual(first_record["reactions"][0]["reaction_smiles"], "C>>O")
+        self.assertEqual(second_record["reactions"][0]["reaction_smiles"], "N>>O")
+        self.assertNotEqual(first["sources"]["enzyme_nomenclature"]["url"], second["sources"]["enzyme_nomenclature"]["url"])
+        self.assertEqual(first_record["provenance"]["protein_annotations"]["url"], "https://example.org/uniprot-v1")
+        self.assertEqual(second_record["provenance"]["protein_annotations"]["url"], "https://example.org/uniprot-v2")
+        self.assertEqual(first_record["provenance"]["reactions"]["url"], "https://example.org/rhea-v1")
+        self.assertEqual(second_record["provenance"]["reactions"]["url"], "https://example.org/rhea-v2")
+        self.assertEqual(first_record["provenance"]["reaction_smiles"]["url"], "https://example.org/smiles-v1")
+        self.assertEqual(second_record["provenance"]["reaction_smiles"]["url"], "https://example.org/smiles-v2")
+        self.assertEqual(cache.catalog_reads, 2)
+        self.assertEqual(cache.refresh_values, [True, True])
+        self.assertEqual(uniprot.call_count, 2)
+        self.assertEqual(rhea.call_count, 2)
+        self.assertEqual(smiles_fetch.call_count, 2)
+        self.assertEqual(directions_fetch.call_count, 2)
+        for source_fetch in (uniprot, rhea, smiles_fetch, directions_fetch):
+            self.assertTrue(all(call.kwargs["refresh"] for call in source_fetch.call_args_list))
+
     def test_reused_reaction_metadata_is_isolated_from_callback_mutation(self) -> None:
         queries = [("enzyme", "Alcohol dehydrogenase"), ("enzyme", "Alcohol:NAD+ oxidoreductase")]
         second_query_equations = []

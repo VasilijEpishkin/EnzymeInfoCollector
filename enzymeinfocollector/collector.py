@@ -26,6 +26,8 @@ MAX_TRANSFER_PATHS = 10_000
 
 
 class EnzymeCollector:
+    """Collect enzyme records; use one instance per concurrent collection."""
+
     def __init__(
         self,
         cache: HttpCache,
@@ -70,6 +72,13 @@ class EnzymeCollector:
     ) -> dict[str, Any]:
         """Collect results; callback mode streams proteins and returns metadata-only enzyme records."""
         queries = list(queries)
+        self._enzyme_entries = None
+        self._enzyme_index = None
+        self._enzyme_source = None
+        self._smiles = None
+        self._smiles_source = None
+        self._directions = None
+        self._directions_source = None
         self._active_results.clear()
         try:
             if on_record is None:
