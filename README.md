@@ -6,7 +6,7 @@ The project is a client-side data collector, not a replacement for BRENDA, Explo
 
 ## Requirements
 
-- Python 3.10 or newer
+- Python 3.11 or newer
 - Network access to ExPASy, UniProt, and Rhea for a fresh collection
 - `openpyxl` only when reading Excel workbooks
 
@@ -46,7 +46,7 @@ enzymeinfocollector --ec 1.1.1.1 --reviewed-only --taxon-id 4932 --no-sequences 
 
 Taxon filters include descendant taxa. `--no-sequences` still returns protein names, accessions, organism IDs, EC annotations, and sequence lengths.
 
-Read a spreadsheet, CSV, or TSV with a `Protein`, `Enzyme`, or `EC number` column. The first worksheet is used for XLSX files.
+Read a CSV or TSV with a `Protein`, `Enzyme`, or `EC number` column. For spreadsheet input, XLSX is also supported when the optional dependency is installed; the first worksheet is used.
 
 ```bash
 enzymeinfocollector --file enzyme_list.xlsx -o enzymes.json
@@ -106,4 +106,4 @@ Run the offline parser, cache, pipeline, and export tests with:
 python -m unittest discover -s tests -v
 ```
 
-GitHub Actions runs the test suite on Python 3.10 and 3.12. The software is licensed under MIT; the separate license text is in [LICENSE](LICENSE).
+GitHub Actions runs the test suite on Python 3.11–3.15 on Linux and checks Python 3.11 and 3.15 on Windows. The software is licensed under MIT; the separate license text is in [LICENSE](LICENSE).
