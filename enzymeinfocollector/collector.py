@@ -356,37 +356,41 @@ class EnzymeCollector:
         terminal_paths: dict[str, list[list[str]]] = {}
         path_limit_reached = False
 
-        pending = [
-            (target, [source["ec_number"], target])
-            for target in reversed(source["transferred_to"])
-        ]
+        path = [source["ec_number"]]
+        active = {source["ec_number"].casefold()}
+        pending = [iter(source["transferred_to"])]
         while pending:
-            ec_number, path = pending.pop()
+            try:
+                ec_number = next(pending[-1])
+            except StopIteration:
+                pending.pop()
+                if len(path) > 1:
+                    active.remove(path.pop().casefold())
+                continue
             if len(paths) >= MAX_TRANSFER_PATHS:
-                paths.append({"ec_numbers": path, "status": "truncated"})
+                paths.append({"ec_numbers": [*path, ec_number], "status": "truncated"})
                 path_limit_reached = True
                 break
             key = ec_number.casefold()
-            if key in {item.casefold() for item in path[:-1]}:
-                paths.append({"ec_numbers": path, "status": "cycle"})
+            if key in active:
+                paths.append({"ec_numbers": [*path, ec_number], "status": "cycle"})
                 continue
             entry = (self._enzyme_index or {}).get(key)
             if entry is None:
-                paths.append({"ec_numbers": path, "status": "missing"})
+                paths.append({"ec_numbers": [*path, ec_number], "status": "missing"})
             elif entry["status"] == "active":
-                terminal_paths.setdefault(entry["ec_number"], []).append(path)
-                paths.append({"ec_numbers": path, "status": "active"})
+                terminal_paths.setdefault(entry["ec_number"], []).append([*path, ec_number])
+                paths.append({"ec_numbers": [*path, ec_number], "status": "active"})
             elif entry["status"] == "deleted":
-                paths.append({"ec_numbers": path, "status": "deleted"})
+                paths.append({"ec_numbers": [*path, ec_number], "status": "deleted"})
             else:
                 redirect_entries.setdefault(key, entry)
                 if entry["transferred_to"]:
-                    pending.extend(
-                        (target, [*path, target])
-                        for target in reversed(entry["transferred_to"])
-                    )
+                    path.append(ec_number)
+                    active.add(key)
+                    pending.append(iter(entry["transferred_to"]))
                 else:
-                    paths.append({"ec_numbers": path, "status": "unresolved_transfer"})
+                    paths.append({"ec_numbers": [*path, ec_number], "status": "unresolved_transfer"})
 
         targets = [
             ((self._enzyme_index or {})[ec.casefold()], target_paths)

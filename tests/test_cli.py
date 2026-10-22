@@ -672,8 +672,18 @@ DE   Terminal enzyme.
         resolution = source["resolution"]
         self.assertEqual(resolution["status"], "partial")
         self.assertEqual(resolution["terminal_ec_numbers"], ["7.9.9.5"])
+        self.assertEqual(resolution["paths"], [
+            {"ec_numbers": ["7.9.9.9", "7.9.9.1", "7.9.9.5"], "status": "active"},
+            {"ec_numbers": ["7.9.9.9", "7.9.9.2", "7.9.9.5"], "status": "active"},
+            {"ec_numbers": ["7.9.9.9", "7.9.9.3"], "status": "deleted"},
+            {"ec_numbers": ["7.9.9.9", "7.9.9.4"], "status": "missing"},
+        ])
         self.assertEqual(len(resolution["resolved_enzymes"]), 1)
         self.assertEqual(len(resolution["resolved_enzymes"][0]["resolution_paths"]), 2)
+        self.assertEqual(
+            resolution["resolved_enzymes"][0]["resolution_paths"],
+            [["7.9.9.9", "7.9.9.1", "7.9.9.5"], ["7.9.9.9", "7.9.9.2", "7.9.9.5"]],
+        )
         self.assertEqual({path["status"] for path in resolution["unresolved_targets"]}, {"deleted", "missing"})
         self.assertEqual(sum("uniprotkb/stream" in url for url in cache.urls), 1)
         with tempfile.TemporaryDirectory() as directory:
@@ -774,6 +784,57 @@ DE   Transferred entry: 7.9.9.9.
         self.assertEqual(resolution["status"], "unresolved")
         self.assertEqual(resolution["paths"][0]["status"], "missing")
         self.assertEqual(len(resolution["paths"][0]["ec_numbers"]), 1102)
+
+    def test_long_transfer_chain_uses_linear_cycle_membership_checks(self) -> None:
+        class CountedEC(str):
+            casefold_calls = 0
+
+            def casefold(self) -> str:
+                type(self).casefold_calls += 1
+                return super().casefold()
+
+        collector = EnzymeCollector(None)  # type: ignore[arg-type]
+        source_ec = CountedEC("1.1.1.1")
+        source = {"ec_number": source_ec, "status": "transferred", "transferred_to": [CountedEC("1.1.1.2")]}
+        entries = [
+            {"ec_number": CountedEC(f"1.1.1.{number}"), "status": "transferred", "transferred_to": [CountedEC(f"1.1.1.{number + 1}")]}
+            for number in range(2, 1502)
+        ]
+        collector._enzyme_index = {entry["ec_number"].casefold(): entry for entry in entries}
+        CountedEC.casefold_calls = 0
+
+        resolution = collector._resolve_transfers(source)
+
+        self.assertEqual(resolution["paths"][0]["status"], "missing")
+        self.assertEqual(len(resolution["paths"][0]["ec_numbers"]), 1502)
+        self.assertLess(CountedEC.casefold_calls, 10 * len(entries))
+
+    def test_transfer_path_limit_only_truncates_when_another_path_is_pending(self) -> None:
+        collector = EnzymeCollector(None)  # type: ignore[arg-type]
+        with patch("enzymeinfocollector.collector.MAX_TRANSFER_PATHS", 2):
+            exact = collector._resolve_transfers({
+                "ec_number": "1.1.1.1", "status": "transferred", "transferred_to": ["1.1.1.2", "1.1.1.3"]
+            })
+            overflow = collector._resolve_transfers({
+                "ec_number": "1.1.1.1", "status": "transferred", "transferred_to": ["1.1.1.2", "1.1.1.3", "1.1.1.4"]
+            })
+        self.assertFalse(exact["path_limit_reached"])
+        self.assertEqual([item["status"] for item in exact["paths"]], ["missing", "missing"])
+        self.assertTrue(overflow["path_limit_reached"])
+        self.assertEqual(overflow["paths"][-1], {"ec_numbers": ["1.1.1.1", "1.1.1.4"], "status": "truncated"})
+
+    def test_transfer_path_limit_truncates_on_the_next_descendant(self) -> None:
+        collector = EnzymeCollector(None)  # type: ignore[arg-type]
+        source = {"ec_number": "1.1.1.1", "status": "transferred", "transferred_to": ["1.1.1.2"]}
+        collector._enzyme_index = {
+            "1.1.1.2": {"ec_number": "1.1.1.2", "status": "transferred", "transferred_to": ["1.1.1.3", "1.1.1.4"]}
+        }
+        with patch("enzymeinfocollector.collector.MAX_TRANSFER_PATHS", 1):
+            resolution = collector._resolve_transfers(source)
+        self.assertEqual(resolution["paths"], [
+            {"ec_numbers": ["1.1.1.1", "1.1.1.2", "1.1.1.3"], "status": "missing"},
+            {"ec_numbers": ["1.1.1.1", "1.1.1.2", "1.1.1.4"], "status": "truncated"},
+        ])
 
     def test_transfer_path_explosion_is_marked_as_truncated(self) -> None:
         collector = EnzymeCollector(None)  # type: ignore[arg-type]
