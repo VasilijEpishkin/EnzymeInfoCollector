@@ -301,6 +301,7 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
             report = cache.inspect()
         self.assertEqual(report["entry_count"], 3)
         self.assertEqual(report["body_bytes"], 16)
+        self.assertEqual(report["lock_count"], 3)
         self.assertEqual(report["orphan_count"], 1)
         self.assertEqual(report["invalid_count"], 1)
         self.assertNotIn("private", repr(report))
@@ -331,6 +332,7 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
             for name in ("recent", "invalid", "orphan"):
                 self.assertTrue((root / f"{keys[name]}.body").exists())
             self.assertTrue((root / f"{keys['old']}.lock").exists())
+            self.assertEqual(cache.inspect()["lock_count"], 4)
 
     def test_http_cache_prune_waits_for_other_process_refresh(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

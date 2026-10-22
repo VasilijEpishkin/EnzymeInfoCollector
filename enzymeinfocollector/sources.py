@@ -358,9 +358,17 @@ class HttpCache:
                         except (OSError, TypeError, ValueError):
                             entry["state"] = "invalid"
                     entries.append(entry)
+            lock_files = [
+                path for path in self.directory.iterdir()
+                if path.suffix == ".lock" and re.fullmatch(r"[0-9a-f]{64}", path.stem)
+            ]
+        else:
+            lock_files = []
         return {
             "entry_count": len(entries),
             "body_bytes": sum(entry["body_bytes"] for entry in entries),
+            "lock_count": len(lock_files),
+            "lock_bytes": sum(path.stat().st_size for path in lock_files),
             "orphan_count": sum(entry["state"] == "orphan" for entry in entries),
             "invalid_count": sum(entry["state"] == "invalid" for entry in entries),
             "entries": entries,

@@ -95,6 +95,7 @@ class CliTests(unittest.TestCase):
             with redirect_stdout(output):
                 self.assertEqual(main(["cache", "info", "--cache-dir", directory]), 0)
         self.assertIn("Cache keys: 1", output.getvalue())
+        self.assertIn("Lock sidecars: 1", output.getvalue())
         self.assertIn("example.org", output.getvalue())
         self.assertNotIn("private", output.getvalue())
 

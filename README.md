@@ -81,7 +81,7 @@ enzymeinfocollector cache prune
 enzymeinfocollector cache prune --older-than-days 60 --apply
 ```
 
-Pruning is a dry run unless `--apply` is supplied; dry runs can create missing `.lock` sidecars so the cache can be inspected consistently while another process is collecting. Pruning locks and rechecks each eligible entry before deleting its body and metadata. Incomplete or invalid entries are reported by `cache info` and left untouched; `.lock` files and temporary files are never removed. Retention cannot be shorter than 30 days, preserving the existing offline fallback window.
+`cache info` also reports the number and logical size of `.lock` sidecars. Pruning is a dry run unless `--apply` is supplied; dry runs can create missing `.lock` sidecars so the cache can be inspected consistently while another process is collecting. Pruning locks and rechecks each eligible entry before deleting its body and metadata. Incomplete or invalid entries are reported by `cache info` and left untouched; `.lock` files and temporary files are never removed. Retention cannot be shorter than 30 days, preserving the existing offline fallback window.
 
 ## Output
 

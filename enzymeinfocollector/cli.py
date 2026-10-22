@@ -325,6 +325,7 @@ def main(argv: list[str] | None = None) -> int:
                 info = cache.inspect()
                 print(f"Cache directory: {args.cache_dir}")
                 print(f"Cache keys: {info['entry_count']}; cached bodies: {_format_bytes(info['body_bytes'])}")
+                print(f"Lock sidecars: {info['lock_count']}; file bytes: {_format_bytes(info['lock_bytes'])}")
                 print(f"Incomplete: {info['orphan_count']}; invalid metadata: {info['invalid_count']}")
                 older = sum(entry["state"] == "ok" and entry["age_seconds"] > 30 * 86400 for entry in info["entries"])
                 print(f"Older than 30 days: {older}")
