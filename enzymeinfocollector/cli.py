@@ -155,6 +155,7 @@ CSV_FIELDS = (
     "catalytic_activity", "uniprot_accession", "entry_name", "protein_name", "gene_names",
     "organism", "organism_id", "reviewed", "length", "sequence", "ec_reactions", "association_basis",
     "enzyme_source", "uniprot_source", "rhea_source", "rhea_smiles_source", "rhea_directions_source",
+    "record_kind", "requested_ec", "enzyme_status", "transferred_to", "resolution_status", "resolution_paths", "unresolved_targets", "path_limit_reached",
 )
 
 
@@ -171,33 +172,46 @@ def _write_csv(path: Path, payload: dict[str, Any]) -> None:
                 })
                 continue
             for enzyme in result["enzymes"]:
-                proteins = enzyme["proteins"] or [None]
-                for protein in proteins:
-                    writer.writerow({
-                        "input_type": result["input"]["type"],
-                        "input_value": result["input"]["value"],
-                        "status": result["status"],
-                        "ec_number": enzyme["ec_number"],
-                        "enzyme_name": enzyme["enzyme_name"],
-                        "alternative_names": _json_cell(enzyme["alternative_names"]),
-                        "catalytic_activity": _json_cell(enzyme["catalytic_activity"]),
-                        "uniprot_accession": protein["accession"] if protein else "",
-                        "entry_name": protein["entry_name"] if protein else "",
-                        "protein_name": protein["protein_name"] if protein else "",
-                        "gene_names": _json_cell(protein["gene_names"]) if protein else "",
-                        "organism": protein["organism"] if protein else "",
-                        "organism_id": protein["organism_id"] if protein else "",
-                        "reviewed": protein["reviewed"] if protein else "",
-                        "length": protein["length"] if protein else "",
-                        "sequence": protein["sequence"] if protein else "",
-                        "ec_reactions": _json_cell(enzyme["reactions"]),
-                        "association_basis": "EC number",
-                        "enzyme_source": _json_cell(enzyme["provenance"]["enzyme_nomenclature"]),
-                        "uniprot_source": _json_cell(enzyme["provenance"]["protein_annotations"]),
-                        "rhea_source": _json_cell(enzyme["provenance"]["reactions"]),
-                        "rhea_smiles_source": _json_cell(enzyme["provenance"]["reaction_smiles"]),
-                        "rhea_directions_source": _json_cell(enzyme["provenance"]["reaction_directions"]),
-                    })
+                records = [(enzyme, "enzyme", "", enzyme.get("resolution"))]
+                resolution = enzyme.get("resolution")
+                if resolution:
+                    records.extend((target, "resolved_target", resolution["requested_ec"], resolution) for target in resolution["resolved_enzymes"])
+                for record, record_kind, requested_ec, resolution in records:
+                    proteins = record["proteins"] or [None]
+                    for protein in proteins:
+                        writer.writerow({
+                            "input_type": result["input"]["type"],
+                            "input_value": result["input"]["value"],
+                            "status": result["status"],
+                            "record_kind": record_kind,
+                            "requested_ec": requested_ec,
+                            "ec_number": record["ec_number"],
+                            "enzyme_status": record["status"],
+                            "transferred_to": _json_cell(record.get("transferred_to", [])),
+                            "resolution_status": resolution["status"] if resolution else "",
+                            "resolution_paths": _json_cell(record.get("resolution_paths", resolution["paths"] if resolution else [])),
+                            "unresolved_targets": _json_cell(resolution["unresolved_targets"]) if resolution and record_kind == "enzyme" else "",
+                            "path_limit_reached": resolution["path_limit_reached"] if resolution else "",
+                            "enzyme_name": record["enzyme_name"],
+                            "alternative_names": _json_cell(record["alternative_names"]),
+                            "catalytic_activity": _json_cell(record["catalytic_activity"]),
+                            "uniprot_accession": protein["accession"] if protein else "",
+                            "entry_name": protein["entry_name"] if protein else "",
+                            "protein_name": protein["protein_name"] if protein else "",
+                            "gene_names": _json_cell(protein["gene_names"]) if protein else "",
+                            "organism": protein["organism"] if protein else "",
+                            "organism_id": protein["organism_id"] if protein else "",
+                            "reviewed": protein["reviewed"] if protein else "",
+                            "length": protein["length"] if protein else "",
+                            "sequence": protein["sequence"] if protein else "",
+                            "ec_reactions": _json_cell(record["reactions"]),
+                            "association_basis": "EC number" if protein else "",
+                            "enzyme_source": _json_cell(record["provenance"]["enzyme_nomenclature"]),
+                            "uniprot_source": _json_cell(record["provenance"]["protein_annotations"]),
+                            "rhea_source": _json_cell(record["provenance"]["reactions"]),
+                            "rhea_smiles_source": _json_cell(record["provenance"]["reaction_smiles"]),
+                            "rhea_directions_source": _json_cell(record["provenance"]["reaction_directions"]),
+                        })
         stream.flush()
         os.fsync(stream.fileno())
 
@@ -211,17 +225,18 @@ def _write_fasta(path: Path, payload: dict[str, Any]) -> None:
     with path.open("w", encoding="utf-8", newline="\n") as stream:
         for result in payload["results"]:
             for enzyme in result["enzymes"]:
-                for protein in enzyme["proteins"]:
-                    accession = protein["accession"]
-                    sequence = protein["sequence"]
-                    if not sequence or accession in written:
-                        continue
-                    written.add(accession)
-                    ec_numbers = ",".join(protein["ec_numbers"] or [enzyme["ec_number"]])
-                    organism = "_".join(protein["organism"].split()) or "unknown"
-                    stream.write(f">{accession} EC={ec_numbers} OS={organism} source=UniProtKB\n")
-                    for offset in range(0, len(sequence), 80):
-                        stream.write(sequence[offset:offset + 80] + "\n")
+                for record in [enzyme, *(enzyme.get("resolution", {}).get("resolved_enzymes", []))]:
+                    for protein in record["proteins"]:
+                        accession = protein["accession"]
+                        sequence = protein["sequence"]
+                        if not sequence or accession in written:
+                            continue
+                        written.add(accession)
+                        ec_numbers = ",".join(protein["ec_numbers"] or [record["ec_number"]])
+                        organism = "_".join(protein["organism"].split()) or "unknown"
+                        stream.write(f">{accession} EC={ec_numbers} OS={organism} source=UniProtKB\n")
+                        for offset in range(0, len(sequence), 80):
+                            stream.write(sequence[offset:offset + 80] + "\n")
         stream.flush()
         os.fsync(stream.fileno())
 
