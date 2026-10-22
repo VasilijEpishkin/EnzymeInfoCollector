@@ -116,6 +116,13 @@ def _read_cache_metadata(path: Path) -> dict[str, Any]:
     return metadata
 
 
+def _cache_fetched_at(metadata: dict[str, Any]) -> datetime:
+    fetched_at = datetime.fromisoformat(metadata["fetched_at"].replace("Z", "+00:00"))
+    if fetched_at.tzinfo is None:
+        raise ValueError("Cache timestamp must include a timezone")
+    return fetched_at
+
+
 class HttpCache:
     def __init__(self, directory: Path, contact_email: str | None = None, timeout: float = 30.0, retries: int = 3):
         self.directory = directory
@@ -138,7 +145,7 @@ class HttpCache:
         try:
             cached_meta = _read_cache_metadata(meta_path)
             body = body_path.read_bytes()
-            fetched_at = datetime.fromisoformat(cached_meta["fetched_at"].replace("Z", "+00:00"))
+            fetched_at = _cache_fetched_at(cached_meta)
             cached_age = max(0, (datetime.now(timezone.utc) - fetched_at).total_seconds())
             if not refresh and cached_age <= ttl_seconds:
                 return CachedResponse(body.decode("utf-8-sig"), {**cached_meta, "cached": True, "stale": False})
@@ -219,7 +226,7 @@ class HttpCache:
         fresh_cache = False
         try:
             cached_meta = _read_cache_metadata(meta_path)
-            fetched_at = datetime.fromisoformat(cached_meta["fetched_at"].replace("Z", "+00:00"))
+            fetched_at = _cache_fetched_at(cached_meta)
             cached_age = max(0, (datetime.now(timezone.utc) - fetched_at).total_seconds())
             if body_path.stat().st_size > MAX_RESPONSE_BYTES:
                 raise DataSourceError("Cached response exceeds 100 MiB")
@@ -321,6 +328,86 @@ class HttpCache:
                 yield stream, {**cached_meta, "cached": True, "stale": True, "warning": str(last_error)}
             return
         raise DataSourceError(f"Request failed for {urllib.parse.urlparse(url).netloc}: {last_error}") from last_error
+
+    def inspect(self) -> dict[str, Any]:
+        entries = []
+        if self.directory.is_dir():
+            keys = {
+                path.stem for path in self.directory.iterdir()
+                if path.suffix in {".body", ".json"} and re.fullmatch(r"[0-9a-f]{64}", path.stem)
+            }
+            for key in sorted(keys):
+                with _cache_lock(self.directory, key):
+                    body_path = self.directory / f"{key}.body"
+                    meta_path = self.directory / f"{key}.json"
+                    has_body, has_metadata = body_path.is_file(), meta_path.is_file()
+                    size_bytes = body_path.stat().st_size if has_body else 0
+                    entry: dict[str, Any] = {"body_bytes": size_bytes, "fetched_at": None, "host": None, "age_seconds": None}
+                    if not (has_body and has_metadata):
+                        entry["state"] = "orphan"
+                    else:
+                        try:
+                            metadata = _read_cache_metadata(meta_path)
+                            fetched_at = _cache_fetched_at(metadata)
+                            entry.update({
+                                "fetched_at": fetched_at.isoformat(),
+                                "host": urllib.parse.urlsplit(metadata.get("url", "")).hostname,
+                                "age_seconds": max(0, (datetime.now(timezone.utc) - fetched_at).total_seconds()),
+                                "state": "ok",
+                            })
+                        except (OSError, TypeError, ValueError):
+                            entry["state"] = "invalid"
+                    entries.append(entry)
+        return {
+            "entry_count": len(entries),
+            "body_bytes": sum(entry["body_bytes"] for entry in entries),
+            "orphan_count": sum(entry["state"] == "orphan" for entry in entries),
+            "invalid_count": sum(entry["state"] == "invalid" for entry in entries),
+            "entries": entries,
+        }
+
+    def prune(self, *, older_than_days: int = 30, apply: bool = False) -> dict[str, int]:
+        if older_than_days < 30:
+            raise ValueError("Cache retention must be at least 30 days")
+        cutoff_seconds = older_than_days * 24 * 60 * 60
+        candidates = 0
+        candidate_bytes = 0
+        removed = 0
+        removed_bytes = 0
+        if not self.directory.is_dir():
+            return {"eligible_count": 0, "eligible_bytes": 0, "removed_count": 0, "removed_bytes": 0}
+        keys = {
+            path.stem for path in self.directory.glob("*.json")
+            if re.fullmatch(r"[0-9a-f]{64}", path.stem)
+        }
+        for key in sorted(keys):
+            with _cache_lock(self.directory, key):
+                body_path = self.directory / f"{key}.body"
+                meta_path = self.directory / f"{key}.json"
+                try:
+                    if not body_path.is_file() or not meta_path.is_file():
+                        continue
+                    metadata = _read_cache_metadata(meta_path)
+                    fetched_at = _cache_fetched_at(metadata)
+                    age_seconds = (datetime.now(timezone.utc) - fetched_at).total_seconds()
+                    if age_seconds <= cutoff_seconds:
+                        continue
+                    size_bytes = body_path.stat().st_size + meta_path.stat().st_size
+                except (OSError, TypeError, ValueError):
+                    continue
+                candidates += 1
+                candidate_bytes += size_bytes
+                if apply:
+                    body_path.unlink()
+                    meta_path.unlink()
+                    removed += 1
+                    removed_bytes += size_bytes
+        return {
+            "eligible_count": candidates,
+            "eligible_bytes": candidate_bytes,
+            "removed_count": removed,
+            "removed_bytes": removed_bytes,
+        }
 
 
 def _validate_utf8_file(path: Path) -> None:

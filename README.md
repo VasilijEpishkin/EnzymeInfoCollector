@@ -73,6 +73,16 @@ enzymeinfocollector --ec 1.1.1.1 --contact-email researcher@example.org --timeou
 
 Concurrent processes coordinate cache reads and refreshes per URL, so they cannot mix a response body with another request's metadata. Small `.lock` sidecar files are retained in the cache directory.
 
+Inspect cache size without displaying query URLs, or preview removal of entries older than the 30-day stale-response window:
+
+```bash
+enzymeinfocollector cache info
+enzymeinfocollector cache prune
+enzymeinfocollector cache prune --older-than-days 60 --apply
+```
+
+Pruning is a dry run unless `--apply` is supplied; dry runs can create missing `.lock` sidecars so the cache can be inspected consistently while another process is collecting. Pruning locks and rechecks each eligible entry before deleting its body and metadata. Incomplete or invalid entries are reported by `cache info` and left untouched; `.lock` files and temporary files are never removed. Retention cannot be shorter than 30 days, preserving the existing offline fallback window.
+
 ## Output
 
 JSON is the default. When an EC entry has been transferred, the original entry remains in `enzymes` and gains a `resolution` object. The collector follows chained and one-to-many ENZYME transfers, fetches each unique active terminal EC once, and records up to 10,000 complete paths per requested EC. If more paths remain, `resolution.path_limit_reached` is `true`, a `truncated` marker appears in `resolution.paths`, and the result is marked partial even if no active terminal was found among the examined paths. `resolution.status` is `resolved`, `partial`, or `unresolved`; missing entries, deleted entries, cycles, and transfers without a target are listed explicitly. Active terminal records appear under `resolution.resolved_enzymes` with the original requested EC and their resolution paths. Existing active and deleted entry records retain their current shape.

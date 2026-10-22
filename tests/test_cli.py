@@ -6,6 +6,10 @@ import json
 import tempfile
 import unittest
 import urllib.parse
+from contextlib import redirect_stderr, redirect_stdout
+from datetime import datetime, timedelta, timezone
+import hashlib
+import io
 from pathlib import Path
 from unittest.mock import patch
 
@@ -79,6 +83,49 @@ class AliasPipelineCache(UnsortedPipelineCache):
 
 
 class CliTests(unittest.TestCase):
+    def test_cache_info_reports_usage_without_exposing_query_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            key = hashlib.sha256(b"https://example.org/data?token=private").hexdigest()
+            (root / f"{key}.body").write_bytes(b"cached")
+            (root / f"{key}.json").write_text(json.dumps({
+                "url": "https://example.org/data?token=private", "fetched_at": "2026-10-22T00:00:00Z",
+            }), encoding="utf-8")
+            output = io.StringIO()
+            with redirect_stdout(output):
+                self.assertEqual(main(["cache", "info", "--cache-dir", directory]), 0)
+        self.assertIn("Cache keys: 1", output.getvalue())
+        self.assertIn("example.org", output.getvalue())
+        self.assertNotIn("private", output.getvalue())
+
+    def test_cache_prune_is_dry_run_unless_apply_is_explicit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            url = "https://example.org/old"
+            key = hashlib.sha256(url.encode()).hexdigest()
+            (root / f"{key}.body").write_bytes(b"old")
+            (root / f"{key}.json").write_text(json.dumps({
+                "url": url,
+                "fetched_at": (datetime.now(timezone.utc) - timedelta(days=31)).isoformat(),
+            }), encoding="utf-8")
+            dry_run_output = io.StringIO()
+            with redirect_stdout(dry_run_output):
+                self.assertEqual(main(["cache", "prune", "--cache-dir", directory]), 0)
+            self.assertTrue((root / f"{key}.body").exists())
+            self.assertIn("Would remove 1", dry_run_output.getvalue())
+            apply_output = io.StringIO()
+            with redirect_stdout(apply_output):
+                self.assertEqual(main(["cache", "prune", "--cache-dir", directory, "--apply"]), 0)
+            self.assertFalse((root / f"{key}.body").exists())
+            self.assertIn("Removed 1", apply_output.getvalue())
+
+    def test_cache_prune_reports_filesystem_errors_without_traceback(self) -> None:
+        error_output = io.StringIO()
+        with patch.object(sources.HttpCache, "prune", side_effect=OSError("read-only cache")), redirect_stderr(error_output):
+            self.assertEqual(main(["cache", "prune", "--apply"]), 1)
+        self.assertIn("enzymeinfocollector: read-only cache", error_output.getvalue())
+        self.assertNotIn("Traceback", error_output.getvalue())
+
     def test_reads_input_csv_using_existing_protein_column(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "enzymes.csv"

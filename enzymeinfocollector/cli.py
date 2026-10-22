@@ -24,7 +24,7 @@ def build_parser() -> argparse.ArgumentParser:
         prog="enzymeinfocollector",
         description="Collect curated enzyme nomenclature, UniProt proteins, and Rhea reactions.",
     )
-    inputs = parser.add_mutually_exclusive_group(required=True)
+    inputs = parser.add_mutually_exclusive_group()
     inputs.add_argument("--enzyme", action="append", help="Enzyme name; can be repeated")
     inputs.add_argument("--ec", action="append", help="Full EC number; can be repeated")
     inputs.add_argument("--file", type=Path, help="CSV, TSV, TXT, or XLSX input file")
@@ -39,6 +39,16 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--reviewed-only", action="store_true", help="Restrict UniProt proteins to reviewed entries")
     parser.add_argument("--taxon-id", type=_positive_int, action="append", help="Restrict UniProt proteins to this NCBI taxon and descendants; may be repeated")
     parser.add_argument("--verbose", action="store_true", help="Log progress and cache use to stderr")
+    commands = parser.add_subparsers(dest="command")
+    cache = commands.add_parser("cache", help="Inspect or prune the local HTTP cache")
+    cache.add_argument("--cache-dir", type=Path, default=argparse.SUPPRESS, help="HTTP cache directory")
+    cache_actions = cache.add_subparsers(dest="cache_action", required=True)
+    info = cache_actions.add_parser("info", help="Summarize cached responses")
+    info.add_argument("--cache-dir", type=Path, default=argparse.SUPPRESS, help="HTTP cache directory")
+    prune = cache_actions.add_parser("prune", help="Preview removal of responses older than 30 days")
+    prune.add_argument("--cache-dir", type=Path, default=argparse.SUPPRESS, help="HTTP cache directory")
+    prune.add_argument("--older-than-days", type=_cache_retention_days, default=30, help="Minimum cache age to remove (at least 30 days)")
+    prune.add_argument("--apply", action="store_true", help="Delete eligible response bodies and metadata")
     return parser
 
 
@@ -122,6 +132,13 @@ def _positive_int(value: str) -> int:
         raise argparse.ArgumentTypeError("must be a positive integer") from error
     if parsed <= 0:
         raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _cache_retention_days(value: str) -> int:
+    parsed = _positive_int(value)
+    if parsed < 30:
+        raise argparse.ArgumentTypeError("must be at least 30 to preserve offline cache fallback")
     return parsed
 
 
@@ -299,6 +316,40 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s: %(message)s")
+    if args.command == "cache":
+        if args.enzyme or args.ec or args.file:
+            parser.error("cache maintenance cannot be combined with collection inputs")
+        try:
+            cache = HttpCache(args.cache_dir)
+            if args.cache_action == "info":
+                info = cache.inspect()
+                print(f"Cache directory: {args.cache_dir}")
+                print(f"Cache keys: {info['entry_count']}; cached bodies: {_format_bytes(info['body_bytes'])}")
+                print(f"Incomplete: {info['orphan_count']}; invalid metadata: {info['invalid_count']}")
+                older = sum(entry["state"] == "ok" and entry["age_seconds"] > 30 * 86400 for entry in info["entries"])
+                print(f"Older than 30 days: {older}")
+                hosts: dict[str, list[int]] = {}
+                for entry in info["entries"]:
+                    host = entry["host"] or "unknown host"
+                    totals = hosts.setdefault(host, [0, 0])
+                    totals[0] += 1
+                    totals[1] += entry["body_bytes"]
+                for host, (count, size) in sorted(hosts.items()):
+                    print(f"  {host}: {count} entr{'y' if count == 1 else 'ies'}, {_format_bytes(size)}")
+                return 0
+            outcome = cache.prune(older_than_days=args.older_than_days, apply=args.apply)
+            action = "Removed" if args.apply else "Would remove"
+            count = outcome["removed_count"] if args.apply else outcome["eligible_count"]
+            size = outcome["removed_bytes"] if args.apply else outcome["eligible_bytes"]
+            print(f"{action} {count} cache entr{'y' if count == 1 else 'ies'} ({_format_bytes(size)}).")
+            if not args.apply and count:
+                print("Run the same command with --apply to delete them.")
+            return 0
+        except (ValueError, OSError) as error:
+            print(f"enzymeinfocollector: {error}", file=sys.stderr)
+            return 1
+    if not (args.enzyme or args.ec or args.file):
+        parser.error("one of --enzyme, --ec, or --file is required")
     if args.timeout <= 0 or args.retries < 0:
         parser.error("--timeout must be positive and --retries must be non-negative")
     try:
@@ -328,3 +379,11 @@ def main(argv: list[str] | None = None) -> int:
     except (ValueError, DataSourceError, OSError) as error:
         print(f"enzymeinfocollector: {error}", file=sys.stderr)
         return 1
+
+
+def _format_bytes(value: int) -> str:
+    if value < 1024:
+        return f"{value} B"
+    if value < 1024 * 1024:
+        return f"{value / 1024:.1f} KiB"
+    return f"{value / (1024 * 1024):.1f} MiB"

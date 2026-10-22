@@ -12,6 +12,7 @@ import unittest
 import urllib.error
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -99,6 +100,15 @@ def _cache_lock_process_worker(
             contender_entered.set()  # type: ignore[attr-defined]
         with counter_lock:  # type: ignore[attr-defined]
             active.value -= 1  # type: ignore[attr-defined]
+
+
+def _cache_refresh_process_worker(directory: str, key: str, url: str, ready: object, release: object) -> None:
+    root = Path(directory)
+    with _cache_lock(root, key):
+        ready.set()  # type: ignore[attr-defined]
+        release.wait(timeout=10)  # type: ignore[attr-defined]
+        fetched_at = datetime.now(timezone.utc).isoformat()
+        (root / f"{key}.json").write_text(json.dumps({"url": url, "fetched_at": fetched_at}), encoding="utf-8")
 
 
 class SourceTests(unittest.TestCase):
@@ -261,6 +271,112 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
                 with cache.open_text(url, ttl_seconds=3600) as (stream, metadata):
                     self.assertEqual(stream.read(), "fresh")
                     self.assertFalse(metadata["cached"])
+
+    def test_http_cache_refreshes_when_timestamp_has_no_timezone(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            (Path(directory) / f"{key}.body").write_bytes(b"old")
+            (Path(directory) / f"{key}.json").write_text(
+                '{"url": "https://example.org/data", "fetched_at": "2026-10-21T12:00:00"}', encoding="utf-8"
+            )
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"fresh")):
+                self.assertEqual(cache.get(url, ttl_seconds=3600).text, "fresh")
+
+    def test_http_cache_inspect_reports_orphans_and_invalid_metadata_without_urls(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory))
+            valid_key = hashlib.sha256(b"valid").hexdigest()
+            orphan_key = hashlib.sha256(b"orphan").hexdigest()
+            invalid_key = hashlib.sha256(b"invalid").hexdigest()
+            root = Path(directory)
+            (root / f"{valid_key}.body").write_bytes(b"123")
+            (root / f"{valid_key}.json").write_text(json.dumps({
+                "url": "https://example.org/data?token=private", "fetched_at": "2026-10-22T00:00:00Z",
+            }), encoding="utf-8")
+            (root / f"{orphan_key}.body").write_bytes(b"orphan")
+            (root / f"{invalid_key}.body").write_bytes(b"invalid")
+            (root / f"{invalid_key}.json").write_text("[]", encoding="utf-8")
+            report = cache.inspect()
+        self.assertEqual(report["entry_count"], 3)
+        self.assertEqual(report["body_bytes"], 16)
+        self.assertEqual(report["orphan_count"], 1)
+        self.assertEqual(report["invalid_count"], 1)
+        self.assertNotIn("private", repr(report))
+
+    def test_http_cache_prune_defaults_to_dry_run_and_preserves_unknown_or_recent_entries(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory))
+            root = Path(directory)
+            now = datetime.now(timezone.utc)
+            keys = {name: hashlib.sha256(name.encode()).hexdigest() for name in ("old", "recent", "invalid", "orphan")}
+            for name, age in (("old", 40), ("recent", 5)):
+                key = keys[name]
+                (root / f"{key}.body").write_bytes(name.encode())
+                (root / f"{key}.json").write_text(json.dumps({
+                    "url": f"https://example.org/{name}", "fetched_at": (now - timedelta(days=age)).isoformat(),
+                }), encoding="utf-8")
+            (root / f"{keys['invalid']}.body").write_bytes(b"invalid")
+            (root / f"{keys['invalid']}.json").write_text('{"fetched_at":"unknown"}', encoding="utf-8")
+            (root / f"{keys['orphan']}.body").write_bytes(b"orphan")
+            dry_run = cache.prune()
+            old_bytes = (root / f"{keys['old']}.body").stat().st_size + (root / f"{keys['old']}.json").stat().st_size
+            self.assertEqual(dry_run, {"eligible_count": 1, "eligible_bytes": old_bytes, "removed_count": 0, "removed_bytes": 0})
+            self.assertTrue((root / f"{keys['old']}.body").exists())
+            applied = cache.prune(apply=True)
+            self.assertEqual(applied["removed_count"], 1)
+            self.assertFalse((root / f"{keys['old']}.body").exists())
+            self.assertFalse((root / f"{keys['old']}.json").exists())
+            for name in ("recent", "invalid", "orphan"):
+                self.assertTrue((root / f"{keys[name]}.body").exists())
+            self.assertTrue((root / f"{keys['old']}.lock").exists())
+
+    def test_http_cache_prune_waits_for_other_process_refresh(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory))
+            root = Path(directory)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode()).hexdigest()
+            (root / f"{key}.body").write_bytes(b"keep")
+            (root / f"{key}.json").write_text(json.dumps({
+                "url": url, "fetched_at": (datetime.now(timezone.utc) - timedelta(days=40)).isoformat(),
+            }), encoding="utf-8")
+            context = multiprocessing.get_context("spawn")
+            ready, release = context.Event(), context.Event()
+            process = context.Process(target=_cache_refresh_process_worker, args=(directory, key, url, ready, release))
+            process.start()
+            self.assertTrue(ready.wait(timeout=5))
+            prune_started, prune_finished = threading.Event(), threading.Event()
+
+            def prune() -> dict[str, int]:
+                prune_started.set()
+                try:
+                    return cache.prune(apply=True)
+                finally:
+                    prune_finished.set()
+
+            try:
+                with ThreadPoolExecutor(max_workers=1) as pool:
+                    pruning = pool.submit(prune)
+                    self.assertTrue(prune_started.wait(timeout=2))
+                    self.assertFalse(prune_finished.wait(timeout=0.1))
+                    release.set()
+                    process.join(timeout=5)
+                    self.assertEqual(process.exitcode, 0)
+                    result = pruning.result(timeout=5)
+            finally:
+                release.set()
+                if process.is_alive():
+                    process.terminate()
+                    process.join(timeout=2)
+            self.assertEqual(result["removed_count"], 0)
+            self.assertTrue((root / f"{key}.body").exists())
+
+    def test_http_cache_prune_rejects_retention_below_stale_fallback_window(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaisesRegex(ValueError, "at least 30 days"):
+                HttpCache(Path(directory)).prune(older_than_days=29)
 
     def test_http_cache_stream_rejects_oversized_body_without_publishing_it(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
