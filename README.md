@@ -1,146 +1,95 @@
 # EnzymeInfoCollector
 
-EnzymeInfoCollector - это комплексный инструмент для сбора и агрегации информации о ферментах из различных источников. Он объединяет данные о EC номерах, последовательностях белков и связанных химических соединениях в единый информационный пакет.
+EnzymeInfoCollector gathers a reproducible enzyme record from three authoritative resources: ExPASy ENZYME for nomenclature and EC entries, UniProtKB for protein annotations and sequences, and Rhea for curated reactions. It writes a local JSON or CSV file and records where each source response came from.
 
-## Функциональность
+The project is a client-side data collector, not a replacement for BRENDA, ExplorEnz, Open Enzyme Database, or CLEAN DB. It uses their complementary identifiers to assemble a small, traceable dataset for research workflows.
 
-- Поиск EC номеров по названиям ферментов
-- Извлечение информации о ферментах из базы данных ExPASy
-- Получение последовательностей белков из UniProt
-- Возможность анализа последовательностей с использованием DIAMOND (опционально)
-- Получение SMILES-представлений и текстовых описаний реакций из Rhea Database
+## Requirements
 
-## Требования
+- Python 3.10 or newer
+- Network access to ExPASy, UniProt, and Rhea for a fresh collection
+- `openpyxl` only when reading Excel workbooks
 
-- Python 3.7+
-- Redis
-- Scrapy
-- Playwright
-- DIAMOND (опционально, для анализа последовательностей)
-- Chromium (для работы Playwright)
+## Install
 
-## Установка
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install .
+```
 
-1. Клонируйте репозиторий:
-   ```
-   git clone https://github.com/yourusername/EnzymeInfoCollector.git
-   cd EnzymeInfoCollector
-   ```
+For XLSX input, install the optional spreadsheet dependency:
 
-2. Создайте виртуальное окружение и активируйте его:
-   ```
-   python -m venv venv
-   source venv/bin/activate  # На Windows используйте: venv\Scripts\activate
-   ```
+```bash
+python -m pip install '.[xlsx]'
+```
 
-3. Установите зависимости:
-   ```
-   pip install -r requirements.txt
-   ```
+## Use
 
-4. Установка и настройка Redis:
-   - Для Windows:
-     1. Скачайте Redis для Windows с https://github.com/microsoftarchive/redis/releases
-     2. Распакуйте архив и запустите redis-server.exe
-   - Для Linux:
-     ```
-     sudo apt-get install redis-server
-     sudo systemctl start redis-server
-     ```
-   - Для macOS:
-     ```
-     brew install redis
-     brew services start redis
-     ```
+Collect by enzyme name (an exact name match is preferred; otherwise the name is matched against official and alternative ENZYME names):
 
-5. Установка Scrapy и создание проекта:
-   ```
-   pip install scrapy
-   scrapy startproject enzyme_collector
-   cd enzyme_collector
-   ```
-   Скопируйте файл `smile_spider.py` в папку `enzyme_collector/enzyme_collector/spiders/`
+```bash
+enzymeinfocollector --enzyme "Alcohol dehydrogenase" --output alcohol-dehydrogenase.json
+```
 
-6. Установите Playwright и браузеры:
-   ```
-   pip install playwright
-   playwright install
-   ```
+Collect by one or more EC numbers:
 
-7. (Опционально) Установите DIAMOND для анализа последовательностей:
-   - Загрузите DIAMOND с официального сайта: https://github.com/bbuchfink/diamond/releases
-   - Добавьте путь к исполняемому файлу DIAMOND в переменную PATH вашей системы
+```bash
+enzymeinfocollector --ec 1.1.1.1 --ec 3.5.1.n3 -o enzymes.json
+```
 
-## Настройка
+Read a spreadsheet, CSV, or TSV with a `Protein`, `Enzyme`, or `EC number` column. The first worksheet is used for XLSX files.
 
-1. Откройте файл `orchestrator.py` и найдите следующие строки:
-   ```python
-   parser.add_argument('--names_ec_path', type=Path, default=Path('names_ec.py'), help="Путь к names_ec.py")
-   parser.add_argument('--ec_entries_path', type=Path, default=Path('ec_entries.py'), help="Путь к ec_entries.py")
-   parser.add_argument('--entries_sequence_path', type=Path, default=Path('ent_seq_v2.py'), help="Путь к entries_sequence.py")
-   parser.add_argument('--smile_spider_path', type=Path, default=Path('smile_spider.py'), help="Путь к smile_spider.py")
-   ```
+```bash
+enzymeinfocollector --file enzyme_list.xlsx -o enzymes.json
+enzymeinfocollector --file enzyme_list.csv -o enzymes.csv
+```
 
-2. Измените пути по умолчанию в соответствии с вашей файловой структурой.
+Export collected protein sequences as FASTA for downstream sequence analysis:
 
-## Использование
+```bash
+enzymeinfocollector --ec 1.1.1.1 -o alcohol-dehydrogenase.fasta
+```
 
-1. Убедитесь, что Redis запущен и работает.
+FASTA records include UniProt accessions, EC annotations, organism names, and source labels. Duplicate accessions are written once. JSON output retains the full reaction and provenance records; FASTA is intended as a sequence-analysis export.
 
-2. Запустите основной скрипт `orchestrator.py`:
+A plain text file may contain one enzyme name or full EC number per line. Prefix an EC number with `EC ` if you want to make its type explicit.
 
-   Для анализа одного фермента:
-   ```
-   python orchestrator.py --enzyme "Glucose oxidase"
-   ```
+Add a contact email to the User-Agent as recommended by Rhea, and tune the request timeout or retry count when needed:
 
-   Для анализа списка ферментов из файла Excel:
-   ```
-   python orchestrator.py --file path/to/enzyme_list.xlsx
-   ```
+```bash
+enzymeinfocollector --ec 1.1.1.1 --contact-email researcher@example.org --timeout 60 --retries 4 --verbose
+```
 
-   Для использования DIAMOND (опционально):
-   ```
-   python orchestrator.py --use-diamond --query input.fasta --db diamond_db --out results.txt
-   ```
+`ENZYMEINFOCOLLECTOR_EMAIL` can provide the contact email instead. `--refresh` requests fresh responses instead of using unexpired cache entries. HTTP responses are cached under `~/.cache/enzymeinfocollector` (or `$XDG_CACHE_HOME/enzymeinfocollector`); source data and API results have a one to seven day cache lifetime. If a transient upstream failure occurs, a cached response up to 30 days old may be used and is marked `stale` in provenance. The program does not silently replace missing data with empty values when an upstream request fails.
 
-   Если вы изменили пути к скриптам, укажите их при запуске:
-   ```
-   python orchestrator.py --enzyme "Glucose oxidase" --names_ec_path /path/to/names_ec.py --ec_entries_path /path/to/ec_entries.py --entries_sequence_path /path/to/ent_seq_v2.py --smile_spider_path /path/to/smile_spider.py
-   ```
+## Output
 
-3. Для запуска Scrapy паука отдельно (если необходимо):
-   ```
-   cd enzyme_collector
-   scrapy crawl rhea_spider
-   ```
+JSON is the default. CSV output uses one row per protein/reaction combination; list-valued columns are JSON-encoded. Each result includes:
 
-## Структура проекта
+- ENZYME EC number, accepted and alternative names, catalytic activity, comments, and UniProt cross-references
+- UniProt accessions, protein/gene names, organism, reviewed status, length, and amino acid sequence
+- Rhea reaction ID, equation, ChEBI participant names and IDs, and reaction SMILES when Rhea provides a matching directed reaction record. Undirected master IDs include available left-to-right/right-to-left SMILES in `reaction_smiles_directions`.
+- Per-source request URL, retrieval time, cache status, and stale-cache warning where applicable
 
-- `orchestrator.py`: Главный скрипт, управляющий процессом сбора данных
-- `names_ec.py`: Поиск EC номеров по названиям ферментов
-- `ec_entries.py`: Получение информации о ферментах по EC номерам
-- `ent_seq_v2.py`: Получение последовательностей белков и информации из UniProt
-- `smile_spider.py`: Scrapy паук для получения SMILES и текстовых реакций из Rhea Database
+Reaction SMILES and the direction mapping are read from Rhea's published TSV files. They are not reconstructed by assuming participant order from the human-readable equation. An undirected reaction has a null `reaction_smiles` value and a `reaction_smiles_directions` object when directed forms are available. A reaction with no matching SMILES record has a null value and an empty directions object.
 
-## Вывод данных
+Output replacement is atomic: a failed collection does not overwrite an existing result file with a partial dataset. A valid query with no match is included in the output with status `not_found`.
 
-Результаты работы скриптов сохраняются в Redis и в итоговом Excel файле `Final_data.xlsx`.
+## Sources and data use
 
-## Решение проблем
+- [ExPASy ENZYME](https://enzyme.expasy.org/) publishes the official nomenclature file used for name and EC lookup.
+- [UniProt REST API](https://rest.uniprot.org/) supplies protein records and sequences.
+- [Rhea REST API](https://www.rhea-db.org/help/rest-api) supplies curated reactions; [Rhea TSV downloads](https://www.rhea-db.org/help/download) supply the directed reaction SMILES file.
 
-- Если возникают проблемы с Redis, убедитесь, что сервер Redis запущен и доступен по адресу localhost:6379.
-- При проблемах с Playwright, попробуйте переустановить браузеры: `playwright install --force`.
-- Если Scrapy паук не работает, проверьте настройки в файле `settings.py` проекта Scrapy.
+Collected records remain subject to each upstream provider's terms, license, attribution, and citation requirements. Check those requirements before redistributing a collected dataset. Rhea describes its reaction-SMILES TSV as experimental/beta data; keep that status in mind when using the strings in downstream chemistry workflows.
 
-## Вклад в проект
+## Development and checks
 
-Мы приветствуем вклад в развитие проекта! Пожалуйста, создайте issue или pull request на GitHub.
+Run the offline parser, cache, pipeline, and export tests with:
 
-## Лицензия
+```bash
+python -m unittest discover -s tests -v
+```
 
-Этот проект распространяется под лицензией MIT. Подробности см. в файле `LICENSE`.
-
-## Контакты
-
-Если у вас есть вопросы или предложения, пожалуйста, создайте issue в этом репозитории или свяжитесь с нами по адресу: basilikegoldenboy@gmail.com
+GitHub Actions runs the test suite on Python 3.10 and 3.12. The software is licensed under MIT; the separate license text is in [LICENSE](LICENSE).

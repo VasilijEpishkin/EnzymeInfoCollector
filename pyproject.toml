@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "enzymeinfocollector"
+version = "1.0.0"
+description = "Reproducible enrichment of enzyme names, EC numbers, proteins, reactions, and reaction SMILES"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [{ name = "Vasilij Epishkin" }]
+dependencies = []
+classifiers = [
+  "Environment :: Console",
+  "Intended Audience :: Science/Research",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Topic :: Scientific/Engineering :: Bio-Informatics",
+]
+
+[project.optional-dependencies]
+xlsx = ["openpyxl>=3.1,<4"]
+
+[project.scripts]
+enzymeinfocollector = "enzymeinfocollector.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["enzymeinfocollector*"]
