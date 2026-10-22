@@ -13,7 +13,7 @@ import io
 from pathlib import Path
 from unittest.mock import patch
 
-from enzymeinfocollector.cli import _queries_from_rows, _read_query_file, _read_request_manifest, main, write_output, write_stream_json_output, write_stream_output
+from enzymeinfocollector.cli import _queries_from_rows, _read_query_file, _read_request_manifest, _write_spooled_proteins, main, write_output, write_stream_json_output, write_stream_output
 from enzymeinfocollector.collector import EnzymeCollector
 from enzymeinfocollector import sources
 from enzymeinfocollector.sources import CachedResponse
@@ -381,6 +381,33 @@ DE   Transferred entry: 7.9.9.9.
                     write_output(eager_path, "json", eager_payload)
                     write_stream_json_output(streamed_path, collector_factory(), queries)
                 self.assertEqual(streamed_path.read_bytes(), eager_path.read_bytes())
+
+    def test_streamed_json_preserves_unicode_and_pretty_formatting(self) -> None:
+        class UnicodeCache(PipelineCache):
+            def get(self, url: str, **kwargs: object) -> CachedResponse:
+                response = super().get(url, **kwargs)
+                if "uniprotkb/stream" in url:
+                    response.text = response.text.replace("Saccharomyces cerevisiae", "München β\u2028line")
+                return response
+
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            eager_path, streamed_path = root / "eager.json", root / "streamed.json"
+            with patch("enzymeinfocollector.collector.utc_now", return_value="2026-10-23T00:00:00Z"):
+                eager = EnzymeCollector(UnicodeCache()).collect([("ec", "1.1.1.1")])  # type: ignore[arg-type]
+                write_output(eager_path, "json", eager)
+                write_stream_json_output(streamed_path, EnzymeCollector(UnicodeCache()), [("ec", "1.1.1.1")])  # type: ignore[arg-type]
+            self.assertEqual(streamed_path.read_bytes(), eager_path.read_bytes())
+            self.assertIn("München β\u2028line".encode("utf-8"), streamed_path.read_bytes())
+
+    def test_streamed_json_rejects_truncated_protein_spool_records(self) -> None:
+        for spool_data, error in (
+            (b"\x00\x00", "Truncated protein spool header"),
+            (bytes(8), "Empty protein spool record"),
+            ((2).to_bytes(8, "big") + b"{", "Truncated protein spool record"),
+        ):
+            with self.subTest(error=error), self.assertRaisesRegex(ValueError, error):
+                _write_spooled_proteins(io.StringIO(), io.BytesIO(spool_data), [(0, 1)], {}, 0)
 
     def test_streamed_json_preserves_destination_on_collection_and_write_failure(self) -> None:
         class BrokenCache:

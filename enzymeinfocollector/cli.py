@@ -304,8 +304,9 @@ def write_stream_json_output(path: Path, collector: EnzymeCollector, queries: li
                     current_start = spool.tell()
                     protein_ranges.setdefault(record_id, [])
                 if protein is not None:
-                    spool.write(json.dumps(protein, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
-                    spool.write(b"\n")
+                    encoded = json.dumps(protein, ensure_ascii=False, indent=2).encode("utf-8")
+                    spool.write(len(encoded).to_bytes(8, "big"))
+                    spool.write(encoded)
                     current_count += 1
 
             payload = collector.collect(queries, on_record=spool_record)
@@ -375,12 +376,26 @@ def _write_spooled_proteins(
         return
     stream.write("[\n")
     written = 0
+    indent = "  " * (level + 1)
     for start, count in ranges:
         spool.seek(start)
         for _ in range(count):
-            protein = json.loads(spool.readline())
-            stream.write("  " * (level + 1))
-            _dump_json_with_protein_spool(protein, stream, spool, protein_ranges, level + 1)
+            header = spool.read(8)
+            if len(header) != 8:
+                raise ValueError("Truncated protein spool header")
+            size = int.from_bytes(header, "big")
+            if size == 0:
+                raise ValueError("Empty protein spool record")
+            encoded = spool.read(size)
+            if len(encoded) != size:
+                raise ValueError("Truncated protein spool record")
+            protein_text = encoded.decode("utf-8")
+            lines = protein_text.split("\n")
+            for line_index, line in enumerate(lines):
+                stream.write(indent)
+                stream.write(line)
+                if line_index + 1 < len(lines):
+                    stream.write("\n")
             written += 1
             stream.write(",\n" if written < protein_count else "\n")
     stream.write("  " * level + "]")
