@@ -35,6 +35,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--timeout", type=float, default=30.0, help="HTTP timeout in seconds (default: 30)")
     parser.add_argument("--retries", type=int, default=3, help="Retries for transient upstream errors (default: 3)")
     parser.add_argument("--refresh", action="store_true", help="Bypass cached responses")
+    parser.add_argument("--no-sequences", action="store_true", help="Fetch protein annotations without amino acid sequences")
+    parser.add_argument("--reviewed-only", action="store_true", help="Restrict UniProt proteins to reviewed entries")
+    parser.add_argument("--taxon-id", type=_positive_int, action="append", help="Restrict UniProt proteins to this NCBI taxon and descendants; may be repeated")
     parser.add_argument("--verbose", action="store_true", help="Log progress and cache use to stderr")
     return parser
 
@@ -112,6 +115,16 @@ def _cell(row: tuple[Any, ...] | list[Any], index: int) -> str:
     return str(row[index]).strip() if index < len(row) and row[index] is not None else ""
 
 
+def _positive_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError("must be a positive integer") from error
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
 def write_output(path: Path, output_format: str, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     selected_format = output_format
@@ -140,8 +153,8 @@ def write_output(path: Path, output_format: str, payload: dict[str, Any]) -> Non
 CSV_FIELDS = (
     "input_type", "input_value", "status", "ec_number", "enzyme_name", "alternative_names",
     "catalytic_activity", "uniprot_accession", "entry_name", "protein_name", "gene_names",
-    "organism", "organism_id", "reviewed", "length", "sequence", "rhea_id", "equation",
-    "chebi_names", "chebi_ids", "reaction_smiles", "reaction_smiles_directions", "enzyme_source", "uniprot_source", "rhea_source", "rhea_smiles_source", "rhea_directions_source",
+    "organism", "organism_id", "reviewed", "length", "sequence", "ec_reactions", "association_basis",
+    "enzyme_source", "uniprot_source", "rhea_source", "rhea_smiles_source", "rhea_directions_source",
 )
 
 
@@ -159,38 +172,32 @@ def _write_csv(path: Path, payload: dict[str, Any]) -> None:
                 continue
             for enzyme in result["enzymes"]:
                 proteins = enzyme["proteins"] or [None]
-                reactions = enzyme["reactions"] or [None]
                 for protein in proteins:
-                    for reaction in reactions:
-                        writer.writerow({
-                            "input_type": result["input"]["type"],
-                            "input_value": result["input"]["value"],
-                            "status": result["status"],
-                            "ec_number": enzyme["ec_number"],
-                            "enzyme_name": enzyme["enzyme_name"],
-                            "alternative_names": _json_cell(enzyme["alternative_names"]),
-                            "catalytic_activity": _json_cell(enzyme["catalytic_activity"]),
-                            "uniprot_accession": protein["accession"] if protein else "",
-                            "entry_name": protein["entry_name"] if protein else "",
-                            "protein_name": protein["protein_name"] if protein else "",
-                            "gene_names": _json_cell(protein["gene_names"]) if protein else "",
-                            "organism": protein["organism"] if protein else "",
-                            "organism_id": protein["organism_id"] if protein else "",
-                            "reviewed": protein["reviewed"] if protein else "",
-                            "length": protein["length"] if protein else "",
-                            "sequence": protein["sequence"] if protein else "",
-                            "rhea_id": f"RHEA:{reaction['rhea_id']}" if reaction else "",
-                            "equation": reaction["equation"] if reaction else "",
-                            "chebi_names": _json_cell(reaction["chebi_names"]) if reaction else "",
-                            "chebi_ids": _json_cell(reaction["chebi_ids"]) if reaction else "",
-                            "reaction_smiles": reaction["reaction_smiles"] if reaction and reaction["reaction_smiles"] else "",
-                            "reaction_smiles_directions": _json_cell(reaction["reaction_smiles_directions"]) if reaction else "",
-                            "enzyme_source": _json_cell(enzyme["provenance"]["enzyme_nomenclature"]),
-                            "uniprot_source": _json_cell(enzyme["provenance"]["protein_annotations"]),
-                            "rhea_source": _json_cell(enzyme["provenance"]["reactions"]),
-                            "rhea_smiles_source": _json_cell(enzyme["provenance"]["reaction_smiles"]),
-                            "rhea_directions_source": _json_cell(enzyme["provenance"]["reaction_directions"]),
-                        })
+                    writer.writerow({
+                        "input_type": result["input"]["type"],
+                        "input_value": result["input"]["value"],
+                        "status": result["status"],
+                        "ec_number": enzyme["ec_number"],
+                        "enzyme_name": enzyme["enzyme_name"],
+                        "alternative_names": _json_cell(enzyme["alternative_names"]),
+                        "catalytic_activity": _json_cell(enzyme["catalytic_activity"]),
+                        "uniprot_accession": protein["accession"] if protein else "",
+                        "entry_name": protein["entry_name"] if protein else "",
+                        "protein_name": protein["protein_name"] if protein else "",
+                        "gene_names": _json_cell(protein["gene_names"]) if protein else "",
+                        "organism": protein["organism"] if protein else "",
+                        "organism_id": protein["organism_id"] if protein else "",
+                        "reviewed": protein["reviewed"] if protein else "",
+                        "length": protein["length"] if protein else "",
+                        "sequence": protein["sequence"] if protein else "",
+                        "ec_reactions": _json_cell(enzyme["reactions"]),
+                        "association_basis": "EC number",
+                        "enzyme_source": _json_cell(enzyme["provenance"]["enzyme_nomenclature"]),
+                        "uniprot_source": _json_cell(enzyme["provenance"]["protein_annotations"]),
+                        "rhea_source": _json_cell(enzyme["provenance"]["reactions"]),
+                        "rhea_smiles_source": _json_cell(enzyme["provenance"]["reaction_smiles"]),
+                        "rhea_directions_source": _json_cell(enzyme["provenance"]["reaction_directions"]),
+                    })
         stream.flush()
         os.fsync(stream.fileno())
 
@@ -229,8 +236,16 @@ def main(argv: list[str] | None = None) -> int:
         queries = read_queries(args)
         if args.file and args.output.resolve() == args.file.resolve():
             raise ValueError("Output path must not overwrite the input file")
+        if args.no_sequences and (args.format == "fasta" or (args.format == "auto" and args.output.suffix.casefold() in {".fa", ".faa", ".fasta"})):
+            raise ValueError("FASTA output requires protein sequences; remove --no-sequences")
         cache = HttpCache(args.cache_dir, contact_email=args.contact_email, timeout=args.timeout, retries=args.retries)
-        payload = EnzymeCollector(cache, refresh=args.refresh).collect(queries)
+        payload = EnzymeCollector(
+            cache,
+            refresh=args.refresh,
+            include_sequences=not args.no_sequences,
+            reviewed_only=args.reviewed_only,
+            taxon_ids=args.taxon_id,
+        ).collect(queries)
         write_output(args.output, args.format, payload)
         not_found = sum(result["status"] == "not_found" for result in payload["results"])
         LOGGER.info("Wrote %d input result(s) to %s (%d unmatched)", len(payload["results"]), args.output, not_found)

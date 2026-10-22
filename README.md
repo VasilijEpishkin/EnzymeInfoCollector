@@ -38,6 +38,14 @@ Collect by one or more EC numbers:
 enzymeinfocollector --ec 1.1.1.1 --ec 3.5.1.n3 -o enzymes.json
 ```
 
+Reduce the UniProt result set or response size with server-side filters. The defaults still include all matching entries and sequences.
+
+```bash
+enzymeinfocollector --ec 1.1.1.1 --reviewed-only --taxon-id 4932 --no-sequences -o annotations.json
+```
+
+Taxon filters include descendant taxa. `--no-sequences` still returns protein names, accessions, organism IDs, EC annotations, and sequence lengths.
+
 Read a spreadsheet, CSV, or TSV with a `Protein`, `Enzyme`, or `EC number` column. The first worksheet is used for XLSX files.
 
 ```bash
@@ -65,16 +73,16 @@ enzymeinfocollector --ec 1.1.1.1 --contact-email researcher@example.org --timeou
 
 ## Output
 
-JSON is the default. CSV output uses one row per protein/reaction combination; list-valued columns are JSON-encoded. Each result includes:
+JSON is the default. CSV output uses one row per UniProt protein for each matched EC entry. Its `ec_reactions` column contains the EC-level Rhea reaction list as JSON, and `association_basis` marks that link as EC-level; it does not claim that each protein has an individually curated link to every reaction. List-valued columns are JSON-encoded. Each result includes:
 
 - ENZYME EC number, accepted and alternative names, catalytic activity, comments, and UniProt cross-references
-- UniProt accessions, protein/gene names, organism, reviewed status, length, and amino acid sequence
+- UniProt accessions, protein/gene names, organism, reviewed status, sequence length, and amino acid sequence when requested
 - Rhea reaction ID, equation, ChEBI participant names and IDs, and reaction SMILES when Rhea provides a matching directed reaction record. Undirected master IDs include available left-to-right/right-to-left SMILES in `reaction_smiles_directions`.
 - Per-source request URL, retrieval time, cache status, and stale-cache warning where applicable
 
 Reaction SMILES and the direction mapping are read from Rhea's published TSV files. They are not reconstructed by assuming participant order from the human-readable equation. An undirected reaction has a null `reaction_smiles` value and a `reaction_smiles_directions` object when directed forms are available. A reaction with no matching SMILES record has a null value and an empty directions object.
 
-Output replacement is atomic: a failed collection does not overwrite an existing result file with a partial dataset. A valid query with no match is included in the output with status `not_found`.
+Output replacement is atomic: a failed collection does not overwrite an existing result file with a partial dataset. A valid query with no match is included in the output with status `not_found`. Rhea responses at its 10,000-row cap are rejected as potentially incomplete rather than written silently.
 
 ## Sources and data use
 

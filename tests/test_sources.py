@@ -4,11 +4,13 @@ import io
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 from pathlib import Path
 from unittest.mock import patch
 
 from enzymeinfocollector.sources import (
     CachedResponse,
+    DataSourceError,
     HttpCache,
     fetch_reaction_smiles,
     fetch_reaction_directions,
@@ -115,6 +117,14 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
         directions, _ = fetch_reaction_directions(directions_cache)  # type: ignore[arg-type]
         self.assertEqual(directions["10000"]["left_to_right"], "10001")
 
+    def test_rhea_result_limit_fails_instead_of_silently_returning_partial_data(self) -> None:
+        response = "Reaction identifier\tEquation\tChEBI name\tChEBI identifier\tEC number\n" + "".join(
+            f"RHEA:{index}\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1\n"
+            for index in range(10_000)
+        )
+        with self.assertRaisesRegex(DataSourceError, "limit"):
+            fetch_rhea("1.1.1.1", FakeCache(response))  # type: ignore[arg-type]
+
     def test_http_cache_retries_and_reuses_fresh_response(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             cache = HttpCache(Path(directory), timeout=1, retries=1)
@@ -127,6 +137,31 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
             self.assertFalse(first.metadata["cached"])
             self.assertTrue(second.metadata["cached"])
             self.assertEqual(request.call_count, 2)
+
+    def test_http_cache_does_not_retry_local_cache_write_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=2)
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"release 1")) as request:
+                with patch("enzymeinfocollector.sources._atomic_write", side_effect=OSError("disk full")):
+                    with self.assertRaisesRegex(OSError, "disk full"):
+                        cache.get("https://example.org/data", ttl_seconds=3600)
+            self.assertEqual(request.call_count, 1)
+
+    def test_uniprot_can_omit_sequences_and_filter_by_review_and_taxon(self) -> None:
+        cache = FakeCache("""Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed
+P00330\tADH1_YEAST\tAlcohol dehydrogenase 1\tADH1\tSaccharomyces cerevisiae\t4932\t1.1.1.1\t348\treviewed
+""")
+        proteins, _ = fetch_uniprot(
+            "1.1.1.1",
+            cache,  # type: ignore[arg-type]
+            include_sequence=False,
+            reviewed_only=True,
+            taxon_ids=[9606, 10090, 9606],
+        )
+        params = urllib.parse.parse_qs(urllib.parse.urlparse(cache.urls[0]).query)
+        self.assertNotIn("sequence", params["fields"][0].split(","))
+        self.assertEqual(params["query"], ["ec:1.1.1.1 AND reviewed:true AND (taxonomy_id:9606 OR taxonomy_id:10090)"])
+        self.assertEqual(proteins[0]["sequence"], "")
 
     def test_cache_uses_recent_snapshot_only_for_transient_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

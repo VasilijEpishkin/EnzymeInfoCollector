@@ -19,9 +19,20 @@ from .sources import (
 
 
 class EnzymeCollector:
-    def __init__(self, cache: HttpCache, *, refresh: bool = False):
+    def __init__(
+        self,
+        cache: HttpCache,
+        *,
+        refresh: bool = False,
+        include_sequences: bool = True,
+        reviewed_only: bool = False,
+        taxon_ids: list[int] | None = None,
+    ):
         self.cache = cache
         self.refresh = refresh
+        self.include_sequences = include_sequences
+        self.reviewed_only = reviewed_only
+        self.taxon_ids = taxon_ids
         self._enzyme_entries: list[dict[str, Any]] | None = None
         self._enzyme_source: dict[str, Any] | None = None
         self._smiles: dict[str, str] | None = None
@@ -72,7 +83,14 @@ class EnzymeCollector:
                     enzymes.append(self._enzyme_result(enzyme, [], [], None, None))
                     continue
                 ec_number = enzyme["ec_number"]
-                proteins, protein_source = fetch_uniprot(ec_number, self.cache, refresh=self.refresh)
+                proteins, protein_source = fetch_uniprot(
+                    ec_number,
+                    self.cache,
+                    refresh=self.refresh,
+                    include_sequence=self.include_sequences,
+                    reviewed_only=self.reviewed_only,
+                    taxon_ids=self.taxon_ids,
+                )
                 reactions, reaction_source = fetch_rhea(ec_number, self.cache, refresh=self.refresh)
                 smiles_by_id: dict[str, str] = {}
                 if reactions:

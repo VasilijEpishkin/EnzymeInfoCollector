@@ -26,6 +26,7 @@ RHEA_SMILES_URL = "https://ftp.expasy.org/databases/rhea/tsv/rhea-reaction-smile
 EC_PATTERN = re.compile(r"^[1-7]\.(?:\d+|n\d+)\.(?:\d+|n\d+)\.(?:\d+|n\d+)$", re.IGNORECASE)
 UNIPROT_ACCESSION = re.compile(r"(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]|[A-NR-Z][0-9][A-Z0-9]{8}[0-9])", re.IGNORECASE)
 MAX_RESPONSE_BYTES = 100 * 1024 * 1024
+RHEA_RESULT_LIMIT = 10_000
 
 
 class DataSourceError(RuntimeError):
@@ -97,23 +98,7 @@ class HttpCache:
             try:
                 with urllib.request.urlopen(request, timeout=self.timeout) as response:
                     payload = response.read(MAX_RESPONSE_BYTES + 1)
-                    if len(payload) > MAX_RESPONSE_BYTES:
-                        raise DataSourceError(f"Response from {urllib.parse.urlparse(url).netloc} exceeds 100 MiB")
-                    metadata = {
-                        "url": url,
-                        "fetched_at": utc_now(),
-                        "etag": response.headers.get("ETag"),
-                        "last_modified": response.headers.get("Last-Modified"),
-                        "cached": False,
-                        "stale": False,
-                    }
-                    _atomic_write(body_path, payload)
-                    _atomic_write(meta_path, json.dumps(metadata, sort_keys=True).encode("utf-8"))
-                    try:
-                        text = payload.decode("utf-8-sig")
-                    except UnicodeDecodeError as error:
-                        raise DataSourceError(f"Response from {urllib.parse.urlparse(url).netloc} is not UTF-8 text") from error
-                    return CachedResponse(text, metadata)
+                    response_headers = response.headers
             except urllib.error.HTTPError as error:
                 if error.code == 304 and body and cached_meta:
                     cached_meta["fetched_at"] = utc_now()
@@ -125,12 +110,30 @@ class HttpCache:
                 if not transient_failure or attempt >= self.retries:
                     break
                 delay = _retry_delay(retry_after, attempt)
-            except (urllib.error.URLError, TimeoutError, OSError) as error:
+            except (urllib.error.URLError, TimeoutError) as error:
                 last_error = error
                 transient_failure = True
                 if attempt >= self.retries:
                     break
                 delay = _retry_delay(None, attempt)
+            else:
+                if len(payload) > MAX_RESPONSE_BYTES:
+                    raise DataSourceError(f"Response from {urllib.parse.urlparse(url).netloc} exceeds 100 MiB")
+                try:
+                    text = payload.decode("utf-8-sig")
+                except UnicodeDecodeError as error:
+                    raise DataSourceError(f"Response from {urllib.parse.urlparse(url).netloc} is not UTF-8 text") from error
+                metadata = {
+                    "url": url,
+                    "fetched_at": utc_now(),
+                    "etag": response_headers.get("ETag"),
+                    "last_modified": response_headers.get("Last-Modified"),
+                    "cached": False,
+                    "stale": False,
+                }
+                _atomic_write(body_path, payload)
+                _atomic_write(meta_path, json.dumps(metadata, sort_keys=True).encode("utf-8"))
+                return CachedResponse(text, metadata)
             time.sleep(delay)
 
         if body and cached_meta and transient_failure and cached_age is not None and cached_age <= 30 * 24 * 60 * 60:
@@ -216,9 +219,26 @@ def find_enzyme_entries(entries: list[dict[str, Any]], name: str) -> list[dict[s
     return sorted(matches, key=lambda item: item["ec_number"])
 
 
-def fetch_uniprot(ec_number: str, cache: HttpCache, *, refresh: bool = False) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def fetch_uniprot(
+    ec_number: str,
+    cache: HttpCache,
+    *,
+    refresh: bool = False,
+    include_sequence: bool = True,
+    reviewed_only: bool = False,
+    taxon_ids: list[int] | None = None,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    if taxon_ids and any(taxon_id <= 0 for taxon_id in taxon_ids):
+        raise ValueError("Taxonomy IDs must be positive integers")
     fields = "accession,id,protein_name,gene_names,organism_name,organism_id,ec,sequence,length,reviewed"
-    params = urllib.parse.urlencode({"query": f"ec:{ec_number}", "fields": fields, "format": "tsv"})
+    if not include_sequence:
+        fields = fields.removesuffix(",sequence,length,reviewed") + ",length,reviewed"
+    query = f"ec:{ec_number}"
+    if reviewed_only:
+        query += " AND reviewed:true"
+    if taxon_ids:
+        query += " AND (" + " OR ".join(f"taxonomy_id:{taxon_id}" for taxon_id in sorted(set(taxon_ids))) + ")"
+    params = urllib.parse.urlencode({"query": query, "fields": fields, "format": "tsv"})
     url = f"{UNIPROT_URL}?{params}"
     response = cache.get(url, ttl_seconds=24 * 60 * 60, refresh=refresh)
     reader = csv.DictReader(io.StringIO(response.text), delimiter="\t")
@@ -250,7 +270,7 @@ def fetch_rhea(ec_number: str, cache: HttpCache, *, refresh: bool = False) -> tu
         "query": f"ec:{ec_number}",
         "columns": "rhea-id,equation,chebi,chebi-id,ec",
         "format": "tsv",
-        "limit": 10000,
+        "limit": RHEA_RESULT_LIMIT,
     })
     url = f"{RHEA_URL}?{params}"
     response = cache.get(url, ttl_seconds=24 * 60 * 60, refresh=refresh)
@@ -269,6 +289,8 @@ def fetch_rhea(ec_number: str, cache: HttpCache, *, refresh: bool = False) -> tu
             "chebi_ids": [value.removeprefix("CHEBI:") for value in _split_values(_field(row, "ChEBI identifier", "chebi-id"))],
             "ec_numbers": [value.removeprefix("EC ") for value in _split_values(_field(row, "EC number", "ec"))],
         })
+    if len(records) >= RHEA_RESULT_LIMIT:
+        raise DataSourceError(f"Rhea reached its {RHEA_RESULT_LIMIT:,}-result limit; refusing a potentially incomplete result")
     records.sort(key=lambda item: item["rhea_id"])
     return records, response.metadata
 
