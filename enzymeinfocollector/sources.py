@@ -58,8 +58,8 @@ def _cache_lock(directory: Path, key: str) -> Iterator[None]:
         if os.name == "nt":
             import msvcrt
 
-            stream.seek(0)
-            if stream.read(1) == b"":
+            stream.seek(0, os.SEEK_END)
+            if stream.tell() == 0:
                 stream.seek(0)
                 stream.write(b"\0")
                 stream.flush()
