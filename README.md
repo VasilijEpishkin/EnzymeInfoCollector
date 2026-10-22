@@ -53,6 +53,16 @@ enzymeinfocollector --file enzyme_list.xlsx -o enzymes.json
 enzymeinfocollector --file enzyme_list.csv -o enzymes.csv
 ```
 
+Save a reusable request manifest with the normalized query list and collection filters, then replay it later without the original input file:
+
+```bash
+enzymeinfocollector --file enzyme_list.csv --reviewed-only --taxon-id 4932 \
+  --save-manifest run.json -o enzymes.fasta
+enzymeinfocollector --replay-manifest run.json -o refreshed-enzymes.fasta
+```
+
+Manifest files contain query values in plain text and should be stored accordingly. They preserve the request and collection filters, not upstream database snapshots; later replays can return different results as ExPASy, UniProt, and Rhea change. Output format, cache, timeout, retry, contact email, and refresh behavior remain controls for each invocation. Replay rejects conflicting collection filters.
+
 Export collected protein sequences as FASTA for downstream sequence analysis:
 
 ```bash

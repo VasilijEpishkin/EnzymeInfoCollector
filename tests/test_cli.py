@@ -13,7 +13,7 @@ import io
 from pathlib import Path
 from unittest.mock import patch
 
-from enzymeinfocollector.cli import _read_query_file, main, write_output, write_stream_output
+from enzymeinfocollector.cli import _read_query_file, _read_request_manifest, main, write_output, write_stream_output
 from enzymeinfocollector.collector import EnzymeCollector
 from enzymeinfocollector import sources
 from enzymeinfocollector.sources import CachedResponse
@@ -146,6 +146,60 @@ class CliTests(unittest.TestCase):
             workbook.save(path)
             workbook.close()
             self.assertEqual(_read_query_file(path), [("enzyme", "Alcohol dehydrogenase"), ("ec", "1.1.1.1")])
+
+    def test_request_manifest_replays_queries_and_collection_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "queries.csv"
+            source.write_text("EC number\n1.1.1.1\n2.2.2.2\n", encoding="utf-8")
+            manifest_path = root / "run.json"
+            initial_output = root / "initial.json"
+            replay_output = root / "replay.json"
+            cache = PipelineCache()
+            with patch("enzymeinfocollector.cli.HttpCache", return_value=cache):
+                self.assertEqual(main([
+                    "--file", str(source), "--reviewed-only", "--taxon-id", "4932", "--no-sequences",
+                    "--save-manifest", str(manifest_path), "--output", str(initial_output),
+                ]), 0)
+            saved = json.loads(manifest_path.read_text(encoding="utf-8"))
+            self.assertEqual(saved["manifest_version"], 1)
+            self.assertEqual(saved["queries"], [
+                {"type": "ec", "value": "1.1.1.1"}, {"type": "ec", "value": "2.2.2.2"},
+            ])
+            self.assertEqual(saved["options"], {
+                "include_sequences": False, "reviewed_only": True, "taxon_ids": [4932],
+            })
+            self.assertNotIn(str(source), manifest_path.read_text(encoding="utf-8"))
+            source.unlink()
+            cache.urls.clear()
+            with patch("enzymeinfocollector.cli.HttpCache", return_value=cache):
+                self.assertEqual(main([
+                    "--replay-manifest", str(manifest_path), "--output", str(replay_output),
+                ]), 0)
+            replayed = json.loads(replay_output.read_text(encoding="utf-8"))
+            self.assertEqual([item["input"]["value"] for item in replayed["results"]], ["1.1.1.1", "2.2.2.2"])
+            uniprot_url = next(url for url in cache.urls if "uniprotkb/stream" in url)
+            params = urllib.parse.parse_qs(urllib.parse.urlparse(uniprot_url).query)
+            self.assertEqual(params["query"], ["ec:1.1.1.1 AND reviewed:true AND (taxonomy_id:4932)"])
+            self.assertNotIn("sequence", params["fields"][0].split(","))
+
+    def test_request_manifest_rejects_invalid_schema_and_conflicting_filters(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "invalid.json"
+            path.write_text(json.dumps({"manifest_version": True, "queries": [], "options": {}}), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Unsupported request manifest version"):
+                _read_request_manifest(path)
+            path.write_text(json.dumps({
+                "manifest_version": 1,
+                "queries": [{"type": "ec", "value": "1.1.1.1"}],
+                "options": {"include_sequences": True, "reviewed_only": False, "taxon_ids": None},
+            }), encoding="utf-8")
+            with patch("enzymeinfocollector.cli.HttpCache") as http_cache:
+                with redirect_stderr(io.StringIO()):
+                    self.assertEqual(main([
+                        "--replay-manifest", str(path), "--reviewed-only", "--output", str(Path(directory) / "out.json"),
+                    ]), 1)
+                http_cache.assert_not_called()
 
     def test_collects_and_exports_provenance_and_reaction_smiles(self) -> None:
         pipeline_cache = PipelineCache()

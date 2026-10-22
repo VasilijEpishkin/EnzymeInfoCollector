@@ -28,7 +28,9 @@ def build_parser() -> argparse.ArgumentParser:
     inputs.add_argument("--enzyme", action="append", help="Enzyme name; can be repeated")
     inputs.add_argument("--ec", action="append", help="Full EC number; can be repeated")
     inputs.add_argument("--file", type=Path, help="CSV, TSV, TXT, or XLSX input file")
+    inputs.add_argument("--replay-manifest", type=Path, help="Repeat queries and filters from a saved request manifest")
     parser.add_argument("--output", "-o", type=Path, default=Path("enzyme_results.json"), help="Output file (default: enzyme_results.json)")
+    parser.add_argument("--save-manifest", type=Path, help="Atomically save the normalized queries and collection filters as JSON")
     parser.add_argument("--format", choices=("auto", "json", "csv", "fasta"), default="auto", help="Output format; auto uses the output extension")
     parser.add_argument("--cache-dir", type=Path, default=default_cache_dir(), help="HTTP cache directory")
     parser.add_argument("--contact-email", default=os.environ.get("ENZYMEINFOCOLLECTOR_EMAIL"), help="Contact email added to upstream User-Agent headers")
@@ -61,6 +63,10 @@ def read_queries(args: argparse.Namespace) -> list[tuple[str, str]]:
         queries = _read_query_file(args.file)
     if not queries or any(not value for _, value in queries):
         raise ValueError("Input must contain at least one non-empty enzyme name or EC number")
+    return _unique_queries(queries)
+
+
+def _unique_queries(queries: list[tuple[str, str]]) -> list[tuple[str, str]]:
     unique: list[tuple[str, str]] = []
     seen: set[tuple[str, str]] = set()
     for query in queries:
@@ -69,6 +75,62 @@ def read_queries(args: argparse.Namespace) -> list[tuple[str, str]]:
             unique.append(query)
             seen.add(key)
     return unique
+
+
+def _read_request_manifest(path: Path) -> tuple[list[tuple[str, str]], dict[str, Any]]:
+    try:
+        manifest = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as error:
+        raise ValueError(f"Could not read request manifest {path}: {error}") from error
+    if not isinstance(manifest, dict) or set(manifest) != {"manifest_version", "queries", "options"}:
+        raise ValueError("Request manifest must contain manifest_version, queries, and options")
+    if type(manifest["manifest_version"]) is not int or manifest["manifest_version"] != 1:
+        raise ValueError(f"Unsupported request manifest version: {manifest['manifest_version']!r}")
+    if not isinstance(manifest["queries"], list):
+        raise ValueError("Request manifest queries must be a list")
+    queries = []
+    for item in manifest["queries"]:
+        if not isinstance(item, dict) or set(item) != {"type", "value"}:
+            raise ValueError("Each manifest query must contain only type and value")
+        query_type, value = item["type"], item["value"]
+        if not isinstance(query_type, str) or query_type not in {"enzyme", "ec"} or not isinstance(value, str) or not value.strip():
+            raise ValueError("Manifest queries need type 'enzyme' or 'ec' and a non-empty string value")
+        queries.append((query_type, validate_ec_number(value) if query_type == "ec" else value.strip()))
+    queries = _unique_queries(queries)
+    if not queries:
+        raise ValueError("Request manifest must contain at least one query")
+    options = manifest["options"]
+    if not isinstance(options, dict) or set(options) != {"include_sequences", "reviewed_only", "taxon_ids"}:
+        raise ValueError("Request manifest options must contain include_sequences, reviewed_only, and taxon_ids")
+    if type(options["include_sequences"]) is not bool or type(options["reviewed_only"]) is not bool:
+        raise ValueError("Manifest include_sequences and reviewed_only options must be booleans")
+    taxon_ids = options["taxon_ids"]
+    if taxon_ids is not None and (
+        not isinstance(taxon_ids, list) or any(type(taxon_id) is not int or taxon_id <= 0 for taxon_id in taxon_ids)
+    ):
+        raise ValueError("Manifest taxon_ids must be null or a list of positive integers")
+    return queries, options
+
+
+def _write_request_manifest(path: Path, queries: list[tuple[str, str]], options: dict[str, Any]) -> None:
+    manifest = {
+        "manifest_version": 1,
+        "queries": [{"type": query_type, "value": value} for query_type, value in queries],
+        "options": options,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temp_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    os.close(descriptor)
+    temp_path = Path(temp_name)
+    try:
+        with temp_path.open("w", encoding="utf-8", newline="\n") as stream:
+            json.dump(manifest, stream, ensure_ascii=False, indent=2)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.replace(temp_path, path)
+    finally:
+        temp_path.unlink(missing_ok=True)
 
 
 def _read_query_file(path: Path | None) -> list[tuple[str, str]]:
@@ -317,7 +379,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s: %(message)s")
     if args.command == "cache":
-        if args.enzyme or args.ec or args.file:
+        if args.enzyme or args.ec or args.file or args.replay_manifest or args.save_manifest:
             parser.error("cache maintenance cannot be combined with collection inputs")
         try:
             cache = HttpCache(args.cache_dir)
@@ -349,23 +411,53 @@ def main(argv: list[str] | None = None) -> int:
         except (ValueError, OSError) as error:
             print(f"enzymeinfocollector: {error}", file=sys.stderr)
             return 1
-    if not (args.enzyme or args.ec or args.file):
-        parser.error("one of --enzyme, --ec, or --file is required")
+    if not (args.enzyme or args.ec or args.file or args.replay_manifest):
+        parser.error("one of --enzyme, --ec, --file, or --replay-manifest is required")
     if args.timeout <= 0 or args.retries < 0:
         parser.error("--timeout must be positive and --retries must be non-negative")
     try:
-        queries = read_queries(args)
+        if args.replay_manifest:
+            queries, manifest_options = _read_request_manifest(args.replay_manifest)
+            if args.no_sequences and manifest_options["include_sequences"]:
+                raise ValueError("--no-sequences conflicts with the replay manifest")
+            if args.reviewed_only and not manifest_options["reviewed_only"]:
+                raise ValueError("--reviewed-only conflicts with the replay manifest")
+            if args.taxon_id is not None and args.taxon_id != manifest_options["taxon_ids"]:
+                raise ValueError("--taxon-id conflicts with the replay manifest")
+            include_sequences = manifest_options["include_sequences"]
+            reviewed_only = manifest_options["reviewed_only"]
+            taxon_ids = manifest_options["taxon_ids"]
+        else:
+            queries = read_queries(args)
+            include_sequences = not args.no_sequences
+            reviewed_only = args.reviewed_only
+            taxon_ids = args.taxon_id
         if args.file and args.output.resolve() == args.file.resolve():
             raise ValueError("Output path must not overwrite the input file")
-        if args.no_sequences and (args.format == "fasta" or (args.format == "auto" and args.output.suffix.casefold() in {".fa", ".faa", ".fasta"})):
+        if args.replay_manifest and args.output.resolve() == args.replay_manifest.resolve():
+            raise ValueError("Output path must not overwrite the replay manifest")
+        if args.save_manifest:
+            if args.output.resolve() == args.save_manifest.resolve():
+                raise ValueError("Manifest path must not overwrite the output file")
+            if args.file and args.save_manifest.resolve() == args.file.resolve():
+                raise ValueError("Manifest path must not overwrite the input file")
+            if args.replay_manifest and args.save_manifest.resolve() == args.replay_manifest.resolve():
+                raise ValueError("Saved manifest path must differ from the replay manifest")
+        if not include_sequences and (_select_format(args.output, args.format) == "fasta"):
             raise ValueError("FASTA output requires protein sequences; remove --no-sequences")
+        if args.save_manifest:
+            _write_request_manifest(args.save_manifest, queries, {
+                "include_sequences": include_sequences,
+                "reviewed_only": reviewed_only,
+                "taxon_ids": taxon_ids,
+            })
         cache = HttpCache(args.cache_dir, contact_email=args.contact_email, timeout=args.timeout, retries=args.retries)
         collector = EnzymeCollector(
             cache,
             refresh=args.refresh,
-            include_sequences=not args.no_sequences,
-            reviewed_only=args.reviewed_only,
-            taxon_ids=args.taxon_id,
+            include_sequences=include_sequences,
+            reviewed_only=reviewed_only,
+            taxon_ids=taxon_ids,
         )
         if _select_format(args.output, args.format) in {"csv", "fasta"}:
             payload = write_stream_output(args.output, args.format, collector, queries)
