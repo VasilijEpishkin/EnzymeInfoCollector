@@ -14,6 +14,7 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
+from enzymeinfocollector import sources
 from enzymeinfocollector.sources import (
     CachedResponse,
     DataSourceError,
@@ -377,6 +378,48 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
         with patch("enzymeinfocollector.sources.UNIPROT_SORT_CHUNK_SIZE", 1), patch("enzymeinfocollector.sources.UNIPROT_MERGE_FAN_IN", 2):
             with iter_uniprot("1.1.1.1", cache) as (proteins, _):  # type: ignore[arg-type]
                 self.assertEqual([protein["accession"] for protein in proteins], [f"P{number:05d}" for number in range(1, 10)])
+
+    def test_reused_uniprot_runs_are_removed_after_final_replay(self) -> None:
+        header = "Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed\tSequence\n"
+        cache = FakeCache(header + "P00002\tn2\tp2\tg2\torg\t1\t1.1.1.1\t2\treviewed\tMM\nP00001\tn1\tp1\tg1\torg\t1\t1.1.1.1\t1\treviewed\tM\n")
+        run_cache: dict[str, tuple[list[Path], dict[str, object]]] = {}
+        with tempfile.TemporaryDirectory() as directory, patch("enzymeinfocollector.sources.UNIPROT_SORT_CHUNK_SIZE", 1), patch(
+            "enzymeinfocollector.sources._build_uniprot_runs",
+            wraps=sources._build_uniprot_runs,
+        ) as build_runs:
+            sort_root = Path(directory)
+            for release in (False, True):
+                with iter_uniprot(
+                    "1.1.1.1",
+                    cache,  # type: ignore[arg-type]
+                    sort_cache=run_cache,  # type: ignore[arg-type]
+                    sort_directory=sort_root,
+                    release_cached_runs=release,
+                ) as (proteins, _):
+                    self.assertEqual([protein["accession"] for protein in proteins], ["P00001", "P00002"])
+            self.assertEqual(build_runs.call_count, 1)
+            self.assertEqual(run_cache, {})
+            self.assertEqual(list(sort_root.iterdir()), [])
+
+    def test_reused_uniprot_runs_are_removed_when_final_replay_fails(self) -> None:
+        cache = FakeCache("Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed\tSequence\nP00001\tn\tp\tg\torg\t1\t1.1.1.1\t1\treviewed\tM\n")
+        run_cache: dict[str, tuple[list[Path], dict[str, object]]] = {}
+        with tempfile.TemporaryDirectory() as directory:
+            sort_root = Path(directory)
+            with iter_uniprot("1.1.1.1", cache, sort_cache=run_cache, sort_directory=sort_root) as (proteins, _):  # type: ignore[arg-type]
+                list(proteins)
+            with self.assertRaisesRegex(RuntimeError, "callback failed"):
+                with iter_uniprot(
+                    "1.1.1.1",
+                    cache,  # type: ignore[arg-type]
+                    sort_cache=run_cache,  # type: ignore[arg-type]
+                    sort_directory=sort_root,
+                    release_cached_runs=True,
+                ) as (proteins, _):
+                    next(proteins)
+                    raise RuntimeError("callback failed")
+            self.assertEqual(run_cache, {})
+            self.assertEqual(list(sort_root.iterdir()), [])
 
     def test_uniprot_can_omit_sequences_and_filter_by_review_and_taxon(self) -> None:
         cache = FakeCache("""Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed

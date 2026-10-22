@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any, Callable
@@ -68,6 +69,7 @@ class EnzymeCollector:
         on_record: Callable[[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
         """Collect results; callback mode streams proteins and returns metadata-only enzyme records."""
+        queries = list(queries)
         if on_record is None:
             return self._collect(queries)
         with TemporaryDirectory(prefix="enzymeinfocollector-collect-") as directory:
@@ -82,10 +84,15 @@ class EnzymeCollector:
         reaction_cache: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None,
     ) -> dict[str, Any]:
         self._load_enzyme_entries()
-        reused_ecs = self._stream_reused_ecs(queries) if on_record else set()
+        prepared_queries, occurrences, transfer_plans = (
+            self._prepare_stream_queries(queries) if on_record else (None, Counter(), {})
+        )
+        reused_ecs = {ec_number for ec_number, count in occurrences.items() if count > 1}
         results = []
-        for query_type, raw_value in queries:
-            if query_type == "ec":
+        for query_index, (query_type, raw_value) in enumerate(queries):
+            if prepared_queries is not None:
+                _, value, matches = prepared_queries[query_index]
+            elif query_type == "ec":
                 value = validate_ec_number(raw_value)
                 match = (self._enzyme_index or {}).get(value.casefold())
                 matches = [match] if match else []
@@ -116,7 +123,9 @@ class EnzymeCollector:
                 if enzyme["status"] == "transferred":
                     source_result = self._enzyme_result(enzyme, [], [], None, None)
                     if on_record:
-                        resolution, targets = self._transfer_plan(enzyme)
+                        resolution_template, targets = transfer_plans[id(enzyme)]
+                        resolution = deepcopy(resolution_template)
+                        resolution["resolved_enzymes"] = []
                         source_result["resolution"] = resolution
                         on_record(result_info, source_result, None, "enzyme", "", resolution)
                         for target, target_paths in targets:
@@ -125,11 +134,15 @@ class EnzymeCollector:
                                 lambda record, protein: on_record(
                                     result_info, record, protein, "resolved_target", enzyme["ec_number"], resolution
                                 ),
-                                record_extra={"requested_ec": enzyme["ec_number"], "resolution_paths": target_paths},
+                                record_extra={
+                                    "requested_ec": enzyme["ec_number"],
+                                    "resolution_paths": deepcopy(target_paths),
+                                },
                                 sort_directory=sort_directory,
                                 sort_cache=sort_cache,
                                 reaction_cache=reaction_cache,
                                 reused_ecs=reused_ecs,
+                                occurrences=occurrences,
                             )
                             resolution["resolved_enzymes"].append(target_result)
                     else:
@@ -150,6 +163,7 @@ class EnzymeCollector:
                         sort_cache=sort_cache,
                         reaction_cache=reaction_cache,
                         reused_ecs=reused_ecs,
+                        occurrences=occurrences,
                     )
                     enzymes.append(record)
                 else:
@@ -174,21 +188,46 @@ class EnzymeCollector:
             "results": results,
         }
 
-    def _stream_reused_ecs(self, queries: list[tuple[str, str]]) -> set[str]:
+    def _prepare_stream_queries(
+        self, queries: list[tuple[str, str]]
+    ) -> tuple[
+        list[tuple[str, str, list[dict[str, Any]]]],
+        Counter[str],
+        dict[int, tuple[dict[str, Any], list[tuple[dict[str, Any], list[list[str]]]]]],
+    ]:
         occurrences: Counter[str] = Counter()
+        prepared = []
+        transfer_plans = {}
         for query_type, raw_value in queries:
             if query_type == "ec":
                 match = (self._enzyme_index or {}).get(validate_ec_number(raw_value).casefold())
                 matches = [match] if match else []
+                value = validate_ec_number(raw_value)
+                if not matches:
+                    matches = [{
+                        "ec_number": value,
+                        "enzyme_name": "",
+                        "alternative_names": [],
+                        "catalytic_activity": [],
+                        "comments": [],
+                        "uniprot_accessions": [],
+                        "status": "not_found_in_expasy",
+                    }]
             else:
-                matches = find_enzyme_entries(self._enzyme_entries or [], raw_value.strip())
+                value = raw_value.strip()
+                matches = find_enzyme_entries(self._enzyme_entries or [], value)
+            prepared.append((query_type, value, matches))
             for enzyme in matches:
                 if enzyme["status"] == "active":
                     occurrences[enzyme["ec_number"].casefold()] += 1
                 elif enzyme["status"] == "transferred":
-                    _, targets = self._transfer_plan(enzyme)
+                    plan = transfer_plans.get(id(enzyme))
+                    if plan is None:
+                        plan = self._transfer_plan(enzyme)
+                        transfer_plans[id(enzyme)] = plan
+                    _, targets = plan
                     occurrences.update(target["ec_number"].casefold() for target, _ in targets)
-        return {ec_number for ec_number, count in occurrences.items() if count > 1}
+        return prepared, occurrences, transfer_plans
 
     def _collect_active_enzyme(self, enzyme: dict[str, Any]) -> dict[str, Any]:
         ec_number = enzyme["ec_number"]
@@ -229,9 +268,11 @@ class EnzymeCollector:
         sort_cache: dict[str, tuple[list[Path], dict[str, Any]]] | None = None,
         reaction_cache: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None,
         reused_ecs: set[str] | None = None,
+        occurrences: Counter[str] | None = None,
     ) -> dict[str, Any]:
         ec_key = enzyme["ec_number"].casefold()
         reuse = reused_ecs is not None and ec_key in reused_ecs
+        release_runs = reuse and occurrences is not None and occurrences[ec_key] == 1
         reaction_cache = reaction_cache if reuse else None
         cached_reactions = reaction_cache.get(ec_key) if reaction_cache is not None else None
         if cached_reactions is None:
@@ -261,8 +302,15 @@ class EnzymeCollector:
             taxon_ids=self.taxon_ids,
             sort_cache=sort_cache if reuse else None,
             sort_directory=sort_directory if reuse else None,
+            release_cached_runs=release_runs,
         ) as (proteins, protein_source):
-            record = self._enzyme_result(enzyme, [], reactions, protein_source, reaction_source)
+            record = self._enzyme_result(
+                enzyme,
+                [],
+                deepcopy(reactions) if reuse else reactions,
+                protein_source,
+                reaction_source,
+            )
             if record_extra:
                 record.update(record_extra)
             found = False
@@ -271,7 +319,11 @@ class EnzymeCollector:
                 on_protein(record, protein)
             if not found:
                 on_protein(record, None)
-            return record
+        if reuse and occurrences is not None:
+            occurrences[ec_key] -= 1
+            if release_runs and reaction_cache is not None:
+                reaction_cache.pop(ec_key, None)
+        return record
 
     def _resolve_transfers(self, source: dict[str, Any]) -> dict[str, Any]:
         resolution, targets = self._transfer_plan(source)

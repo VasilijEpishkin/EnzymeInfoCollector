@@ -13,6 +13,7 @@ import json
 import os
 import pickle
 import re
+import shutil
 import tempfile
 import time
 import urllib.error
@@ -457,6 +458,7 @@ def iter_uniprot(
     taxon_ids: list[int] | None = None,
     sort_cache: dict[str, tuple[list[Path], dict[str, Any]]] | None = None,
     sort_directory: Path | None = None,
+    release_cached_runs: bool = False,
 ) -> Iterator[tuple[Iterator[dict[str, Any]], dict[str, Any]]]:
     """Yield UniProt proteins sorted by accession using bounded in-memory runs."""
     if taxon_ids and any(taxon_id <= 0 for taxon_id in taxon_ids):
@@ -487,12 +489,17 @@ def iter_uniprot(
             cached = (run_paths, metadata)
             sort_cache[url] = cached
         run_paths, metadata = cached
-        with ExitStack() as stack:
-            streams = [stack.enter_context(path.open("rb")) for path in run_paths]
-            yield heapq.merge(
-                *(_read_uniprot_run(stream) for stream in streams),
-                key=lambda record: record["accession"],
-            ), metadata
+        try:
+            with ExitStack() as stack:
+                streams = [stack.enter_context(path.open("rb")) for path in run_paths]
+                yield heapq.merge(
+                    *(_read_uniprot_run(stream) for stream in streams),
+                    key=lambda record: record["accession"],
+                ), metadata
+        finally:
+            if release_cached_runs:
+                sort_cache.pop(url, None)
+                shutil.rmtree(sort_directory / hashlib.sha256(url.encode("utf-8")).hexdigest(), ignore_errors=True)
         return
 
     with tempfile.TemporaryDirectory(prefix="enzymeinfocollector-sort-") as directory:

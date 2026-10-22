@@ -202,6 +202,30 @@ DE   Terminal enzyme.
                 rows = list(csv.DictReader(stream))
         self.assertEqual([row["input_value"] for row in rows], [queries[0][1]] * 2 + [queries[1][1]] * 2)
 
+    def test_reused_reaction_metadata_is_isolated_from_callback_mutation(self) -> None:
+        queries = [("enzyme", "Alcohol dehydrogenase"), ("enzyme", "Alcohol:NAD+ oxidoreductase")]
+        second_query_equations = []
+
+        def mutate_first_query(
+            result: dict[str, object],
+            record: dict[str, object] | None,
+            _protein: dict[str, object] | None,
+            _record_kind: str,
+            _requested_ec: str,
+            _resolution: dict[str, object] | None,
+        ) -> None:
+            if record is None or not record.get("reactions"):
+                return
+            reactions = record["reactions"]
+            if result["input"]["value"] == queries[0][1]:  # type: ignore[index]
+                reactions[0]["equation"] = "callback mutation"  # type: ignore[index]
+            else:
+                second_query_equations.append(reactions[0]["equation"])  # type: ignore[index]
+
+        EnzymeCollector(AliasPipelineCache()).collect(queries, on_record=mutate_first_query)  # type: ignore[arg-type]
+        self.assertTrue(second_query_equations)
+        self.assertEqual(second_query_equations[0], "A = B")
+
     def test_streamed_transfer_sources_reuse_terminal_ec_runs(self) -> None:
         entries = """ID   7.9.9.9
 DE   Transferred entry: 7.9.9.5.
@@ -249,11 +273,22 @@ DE   Terminal enzyme.
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "result.csv"
             path.write_bytes(b"previous output\n")
-            with patch("enzymeinfocollector.cli._csv_export_row", side_effect=OSError("disk full")):
-                with self.assertRaisesRegex(OSError, "disk full"):
-                    write_stream_output(path, "csv", EnzymeCollector(PipelineCache()), [("ec", "1.1.1.1")])  # type: ignore[arg-type]
+            collect_directories = []
+            real_temporary_directory = tempfile.TemporaryDirectory
+
+            def capture_collect_directory(*args: object, **kwargs: object) -> tempfile.TemporaryDirectory[str]:
+                temporary_directory = real_temporary_directory(*args, **kwargs)
+                collect_directories.append(Path(temporary_directory.name))
+                return temporary_directory
+
+            with patch("enzymeinfocollector.collector.TemporaryDirectory", side_effect=capture_collect_directory):
+                with patch("enzymeinfocollector.cli._csv_export_row", side_effect=OSError("disk full")):
+                    with self.assertRaisesRegex(OSError, "disk full"):
+                        write_stream_output(path, "csv", EnzymeCollector(PipelineCache()), [("ec", "1.1.1.1")])  # type: ignore[arg-type]
             self.assertEqual(path.read_bytes(), b"previous output\n")
             self.assertEqual(list(Path(directory).glob(".result.csv.*.tmp")), [])
+            self.assertEqual(len(collect_directories), 1)
+            self.assertFalse(collect_directories[0].exists())
 
     def test_cli_routes_csv_exports_through_streaming_writer(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
