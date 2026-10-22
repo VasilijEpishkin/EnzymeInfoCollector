@@ -149,7 +149,7 @@ class EnzymeCollector:
                         source_result["resolution"] = self._resolve_transfers(enzyme)
                     enzymes.append(source_result)
                     continue
-                if enzyme["status"] != "active":
+                if enzyme["status"] not in {"active", "not_found_in_expasy"}:
                     record = self._enzyme_result(enzyme, [], [], None, None)
                     enzymes.append(record)
                     if on_record:
@@ -218,7 +218,7 @@ class EnzymeCollector:
                 matches = find_enzyme_entries(self._enzyme_entries or [], value)
             prepared.append((query_type, value, matches))
             for enzyme in matches:
-                if enzyme["status"] == "active":
+                if enzyme["status"] in {"active", "not_found_in_expasy"}:
                     occurrences[enzyme["ec_number"].casefold()] += 1
                 elif enzyme["status"] == "transferred":
                     plan = transfer_plans.get(id(enzyme))

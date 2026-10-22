@@ -464,10 +464,14 @@ def main(argv: list[str] | None = None) -> int:
         else:
             payload = collector.collect(queries)
             write_output(args.output, args.format, payload)
-        not_found = sum(result["status"] == "not_found" for result in payload["results"])
-        LOGGER.info("Wrote %d input result(s) to %s (%d unmatched)", len(payload["results"]), args.output, not_found)
+        not_in_expasy = sum(
+            result["status"] == "not_found"
+            or any(enzyme["status"] == "not_found_in_expasy" for enzyme in result["enzymes"])
+            for result in payload["results"]
+        )
+        LOGGER.info("Wrote %d input result(s) to %s (%d without an ExPASy match)", len(payload["results"]), args.output, not_in_expasy)
         if not args.verbose:
-            print(f"Wrote {len(payload['results'])} result(s) to {args.output}; unmatched: {not_found}", file=sys.stderr)
+            print(f"Wrote {len(payload['results'])} result(s) to {args.output}; without an ExPASy match: {not_in_expasy}", file=sys.stderr)
         return 0
     except (ValueError, DataSourceError, OSError) as error:
         print(f"enzymeinfocollector: {error}", file=sys.stderr)

@@ -108,7 +108,7 @@ CSV and FASTA CLI exports process proteins in bounded batches and use temporary 
 
 Reaction SMILES and the direction mapping are read from Rhea's published TSV files. They are not reconstructed by assuming participant order from the human-readable equation. An undirected reaction has a null `reaction_smiles` value and a `reaction_smiles_directions` object when directed forms are available. A reaction with no matching SMILES record has a null value and an empty directions object.
 
-Output replacement is atomic: a failed collection does not overwrite an existing result file with a partial dataset. A valid query with no match is included in the output with status `not_found`. Rhea responses at its 10,000-row cap are rejected as potentially incomplete rather than written silently.
+Output replacement is atomic: a failed collection does not overwrite an existing result file with a partial dataset. An enzyme-name query with no ExPASy match is included with result status `not_found`. For an explicit valid EC missing from ExPASy, the requested number is retained with enzyme status `not_found_in_expasy`; UniProt and Rhea are still queried independently, so protein or reaction data can be present. The CLI summary reports inputs without an ExPASy match separately from collection failures. Rhea responses at its 10,000-row cap are rejected as potentially incomplete rather than written silently.
 
 ## Sources and data use
 

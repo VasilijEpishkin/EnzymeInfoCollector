@@ -82,6 +82,29 @@ class AliasPipelineCache(UnsortedPipelineCache):
         return response
 
 
+class MissingExpasyCache(PipelineCache):
+    def __init__(self, *, secondary_hits: bool):
+        super().__init__()
+        self.secondary_hits = secondary_hits
+
+    def get(self, url: str, **kwargs: object) -> CachedResponse:
+        parsed = urllib.parse.urlparse(url)
+        query = urllib.parse.parse_qs(parsed.query).get("query", [""])[0]
+        if "ec:2.2.2.2" in query and "uniprotkb/stream" in url:
+            self.urls.append(url)
+            body = "Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed\tSequence\n"
+            if self.secondary_hits:
+                body += "P22222\tTEST_EC\tTest enzyme\tTEST\tTest organism\t9606\t2.2.2.2\t11\treviewed\tMSTAGKVIKCK\n"
+            return CachedResponse(body, {"url": url, "fetched_at": "2026-10-22T00:00:00Z", "cached": False, "stale": False})
+        if "ec:2.2.2.2" in query and "rhea-db.org/rhea/" in url:
+            self.urls.append(url)
+            body = "Reaction identifier\tEquation\tChEBI name\tChEBI identifier\tEC number\n"
+            if self.secondary_hits:
+                body += "RHEA:10000\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 2.2.2.2\n"
+            return CachedResponse(body, {"url": url, "fetched_at": "2026-10-22T00:00:00Z", "cached": False, "stale": False})
+        return super().get(url, **kwargs)
+
+
 class CliTests(unittest.TestCase):
     def test_cache_info_reports_usage_without_exposing_query_urls(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -460,7 +483,8 @@ DE   Terminal enzyme.
         self.assertEqual(saved["results"][0]["enzymes"][0]["resolution"]["status"], "partial")
 
     def test_csv_keeps_ec_numbers_missing_from_expasy(self) -> None:
-        payload = EnzymeCollector(PipelineCache()).collect([("ec", "2.2.2.2")])  # type: ignore[arg-type]
+        cache = MissingExpasyCache(secondary_hits=False)
+        payload = EnzymeCollector(cache).collect([("ec", "2.2.2.2")])  # type: ignore[arg-type]
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "result.csv"
             write_output(path, "auto", payload)
@@ -468,6 +492,44 @@ DE   Terminal enzyme.
                 row = next(csv.DictReader(stream))
         self.assertEqual(row["ec_number"], "2.2.2.2")
         self.assertEqual(row["enzyme_status"], "not_found_in_expasy")
+        self.assertEqual(payload["results"][0]["status"], "found")
+        self.assertEqual(sum("uniprotkb/stream" in url for url in cache.urls), 1)
+        self.assertEqual(sum("rhea-db.org/rhea/" in url for url in cache.urls), 1)
+
+    def test_ec_missing_from_expasy_is_enriched_from_secondary_sources_in_both_modes(self) -> None:
+        queries = [("ec", "2.2.2.2"), ("ec", "2.2.2.2")]
+        direct_cache = MissingExpasyCache(secondary_hits=True)
+        payload = EnzymeCollector(direct_cache).collect(queries)  # type: ignore[arg-type]
+        record = payload["results"][0]["enzymes"][0]
+        self.assertEqual(record["status"], "not_found_in_expasy")
+        self.assertEqual(record["enzyme_name"], "")
+        self.assertEqual([protein["accession"] for protein in record["proteins"]], ["P22222"])
+        self.assertEqual([reaction["rhea_id"] for reaction in record["reactions"]], ["10000"])
+        self.assertIn("uniprotkb/stream", record["provenance"]["protein_annotations"]["url"])
+        self.assertIn("rhea-db.org/rhea/", record["provenance"]["reactions"]["url"])
+        self.assertEqual(sum("uniprotkb/stream" in url for url in direct_cache.urls), 1)
+        self.assertEqual(sum("rhea-db.org/rhea/" in url for url in direct_cache.urls), 1)
+        with tempfile.TemporaryDirectory() as directory:
+            direct_path = Path(directory) / "direct.csv"
+            streamed_path = Path(directory) / "streamed.csv"
+            fasta_path = Path(directory) / "proteins.fasta"
+            write_output(direct_path, "csv", payload)
+            stream_cache = MissingExpasyCache(secondary_hits=True)
+            write_stream_output(streamed_path, "csv", EnzymeCollector(stream_cache), queries)  # type: ignore[arg-type]
+            write_output(fasta_path, "fasta", payload)
+            self.assertEqual(streamed_path.read_bytes(), direct_path.read_bytes())
+            self.assertIn(">P22222 EC=2.2.2.2", fasta_path.read_text(encoding="utf-8"))
+        self.assertEqual(sum("uniprotkb/stream" in url for url in stream_cache.urls), 1)
+        self.assertEqual(sum("rhea-db.org/rhea/" in url for url in stream_cache.urls), 1)
+
+    def test_missing_expasy_ec_cli_reports_catalog_absence(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            output = io.StringIO()
+            path = Path(directory) / "result.csv"
+            with patch("enzymeinfocollector.cli.HttpCache", return_value=MissingExpasyCache(secondary_hits=True)):
+                with redirect_stderr(output):
+                    self.assertEqual(main(["--ec", "2.2.2.2", "--output", str(path)]), 0)
+        self.assertIn("without an ExPASy match: 1", output.getvalue())
 
     def test_transfer_cycle_is_reported_without_recursion_failure(self) -> None:
         cache = TransferCache("""ID   7.9.9.9
