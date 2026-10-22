@@ -1,10 +1,16 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import json
+import multiprocessing
+import threading
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.parse
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -12,6 +18,7 @@ from enzymeinfocollector.sources import (
     CachedResponse,
     DataSourceError,
     HttpCache,
+    _cache_lock,
     fetch_reaction_smiles,
     fetch_reaction_directions,
     fetch_rhea,
@@ -63,6 +70,33 @@ class ResetHttpResponse(FakeHttpResponse):
             self.first_read = False
             return self.body.read(4)
         raise ConnectionResetError("connection reset")
+
+
+def _cache_lock_process_worker(
+    directory: str,
+    holder_entered: object,
+    contender_attempted: object,
+    contender_entered: object,
+    release_holder: object,
+    active: object,
+    maximum: object,
+    counter_lock: object,
+    holder: bool,
+) -> None:
+    if not holder:
+        holder_entered.wait(timeout=5)  # type: ignore[attr-defined]
+        contender_attempted.set()  # type: ignore[attr-defined]
+    with _cache_lock(Path(directory), "shared-url"):
+        with counter_lock:  # type: ignore[attr-defined]
+            active.value += 1  # type: ignore[attr-defined]
+            maximum.value = max(maximum.value, active.value)  # type: ignore[attr-defined]
+        if holder:
+            holder_entered.set()  # type: ignore[attr-defined]
+            release_holder.wait(timeout=5)  # type: ignore[attr-defined]
+        else:
+            contender_entered.set()  # type: ignore[attr-defined]
+        with counter_lock:  # type: ignore[attr-defined]
+            active.value -= 1  # type: ignore[attr-defined]
 
 
 class SourceTests(unittest.TestCase):
@@ -236,6 +270,104 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
                 with cache.open_text("https://example.org/data", ttl_seconds=3600) as (stream, _):
                     self.assertEqual(stream.read(), "recovered")
             self.assertNotIn("If-None-Match", request.call_args.args[0].header_items())
+
+    def test_http_cache_serializes_concurrent_refreshes_for_the_same_url(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            barrier = threading.Barrier(3)
+            first_read_started = threading.Event()
+            release_first_read = threading.Event()
+            state = {"active": 0, "maximum": 0, "calls": 0}
+            state_lock = threading.Lock()
+
+            def response_for_request(*_args: object, **_kwargs: object) -> FakeHttpResponse:
+                with state_lock:
+                    state["active"] += 1
+                    state["maximum"] = max(state["maximum"], state["active"])
+                    state["calls"] += 1
+                    sequence = state["calls"]
+
+                class TrackedResponse(FakeHttpResponse):
+                    def __init__(self) -> None:
+                        super().__init__(f"body-{sequence}".encode(), {"ETag": f'"{sequence}"'})
+                        self.released = False
+
+                    def read(self, size: int = -1) -> bytes:
+                        if sequence == 1 and not self.released:
+                            first_read_started.set()
+                            release_first_read.wait(timeout=5)
+                        chunk = super().read(size)
+                        if not chunk and not self.released:
+                            self.released = True
+                            with state_lock:
+                                state["active"] -= 1
+                        return chunk
+
+                return TrackedResponse()
+
+            def refresh() -> str:
+                barrier.wait()
+                with cache.open_text("https://example.org/concurrent", ttl_seconds=0, refresh=True) as (stream, _):
+                    return stream.read()
+
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", side_effect=response_for_request):
+                with ThreadPoolExecutor(max_workers=2) as workers:
+                    futures = [workers.submit(refresh) for _ in range(2)]
+                    barrier.wait()
+                    self.assertTrue(first_read_started.wait(timeout=2))
+                    time.sleep(0.05)
+                    self.assertEqual(state["calls"], 1)
+                    release_first_read.set()
+                    bodies = [future.result() for future in futures]
+
+            key = hashlib.sha256(b"https://example.org/concurrent").hexdigest()
+            body = (Path(directory) / f"{key}.body").read_text()
+            metadata = json.loads((Path(directory) / f"{key}.json").read_text())
+            self.assertEqual(state["calls"], 2)
+            self.assertEqual(state["maximum"], 1)
+            self.assertEqual(set(bodies), {"body-1", "body-2"})
+            self.assertEqual(metadata["etag"], f'"{body.removeprefix("body-")}"')
+
+    @unittest.skipUnless("fork" in multiprocessing.get_all_start_methods(), "POSIX process lock check")
+    def test_http_cache_lock_serializes_separate_processes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            context = multiprocessing.get_context("fork")
+            holder_entered = context.Event()
+            contender_attempted = context.Event()
+            contender_entered = context.Event()
+            release_holder = context.Event()
+            active = context.Value("i", 0)
+            maximum = context.Value("i", 0)
+            counter_lock = context.Lock()
+            processes = [
+                context.Process(
+                    target=_cache_lock_process_worker,
+                    args=(directory, holder_entered, contender_attempted, contender_entered, release_holder, active, maximum, counter_lock, True),
+                ),
+                context.Process(
+                    target=_cache_lock_process_worker,
+                    args=(directory, holder_entered, contender_attempted, contender_entered, release_holder, active, maximum, counter_lock, False),
+                ),
+            ]
+            contender_was_blocked = False
+            try:
+                for process in processes:
+                    process.start()
+                self.assertTrue(holder_entered.wait(timeout=2))
+                self.assertTrue(contender_attempted.wait(timeout=2))
+                contender_was_blocked = not contender_entered.wait(timeout=0.1)
+            finally:
+                release_holder.set()
+                for process in processes:
+                    if process.pid is not None:
+                        process.join(timeout=5)
+                        if process.is_alive():
+                            process.terminate()
+                            process.join()
+            for process in processes:
+                self.assertEqual(process.exitcode, 0)
+            self.assertTrue(contender_was_blocked)
+            self.assertEqual(maximum.value, 1)
 
     def test_uniprot_merge_bounds_open_runs_and_keeps_accession_order(self) -> None:
         cache = FakeCache("Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed\tSequence\n" + "".join(

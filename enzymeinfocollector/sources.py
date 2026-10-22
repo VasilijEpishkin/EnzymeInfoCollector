@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import codecs
+import errno
 import heapq
 import http.client
 import hashlib
@@ -47,6 +48,44 @@ class CachedResponse:
     metadata: dict[str, Any]
 
 
+@contextmanager
+def _cache_lock(directory: Path, key: str) -> Iterator[None]:
+    """Serialize readers and publishers for one cache key across processes."""
+    directory.mkdir(parents=True, exist_ok=True)
+    lock_path = directory / f"{key}.lock"
+    with lock_path.open("a+b") as stream:
+        if os.name == "nt":
+            import msvcrt
+
+            stream.seek(0)
+            if stream.read(1) == b"":
+                stream.seek(0)
+                stream.write(b"\0")
+                stream.flush()
+            stream.seek(0)
+            while True:
+                try:
+                    msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError as error:
+                    if error.errno != errno.EACCES:
+                        raise
+                    time.sleep(0.1)
+            try:
+                yield
+            finally:
+                stream.seek(0)
+                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+
+
 def utc_now() -> str:
     return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
@@ -78,6 +117,11 @@ class HttpCache:
         self.user_agent = f"EnzymeInfoCollector/1.0.0 (+https://github.com/VasilijEpishkin/EnzymeInfoCollector{contact})"
 
     def get(self, url: str, *, ttl_seconds: int, refresh: bool = False) -> CachedResponse:
+        key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        with _cache_lock(self.directory, key):
+            return self._get_locked(url, ttl_seconds=ttl_seconds, refresh=refresh)
+
+    def _get_locked(self, url: str, *, ttl_seconds: int, refresh: bool = False) -> CachedResponse:
         key = hashlib.sha256(url.encode("utf-8")).hexdigest()
         body_path = self.directory / f"{key}.body"
         meta_path = self.directory / f"{key}.json"
@@ -150,6 +194,13 @@ class HttpCache:
 
     @contextmanager
     def open_text(self, url: str, *, ttl_seconds: int, refresh: bool = False) -> Iterator[tuple[TextIO, dict[str, Any]]]:
+        key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        with _cache_lock(self.directory, key):
+            with self._open_text_locked(url, ttl_seconds=ttl_seconds, refresh=refresh) as response:
+                yield response
+
+    @contextmanager
+    def _open_text_locked(self, url: str, *, ttl_seconds: int, refresh: bool = False) -> Iterator[tuple[TextIO, dict[str, Any]]]:
         """Open a cached response as text without copying the complete body into memory."""
         key = hashlib.sha256(url.encode("utf-8")).hexdigest()
         body_path = self.directory / f"{key}.body"
