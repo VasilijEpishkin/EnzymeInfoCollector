@@ -16,6 +16,7 @@ from enzymeinfocollector.sources import (
     fetch_reaction_directions,
     fetch_rhea,
     fetch_uniprot,
+    iter_uniprot,
     find_enzyme_entries,
     parse_enzyme_dat,
     validate_ec_number,
@@ -45,6 +46,23 @@ class FakeHttpResponse:
 
     def __exit__(self, *_args: object) -> None:
         return None
+
+
+class InterruptedHttpResponse(FakeHttpResponse):
+    def read(self, size: int = -1) -> bytes:
+        raise urllib.error.URLError("connection dropped")
+
+
+class ResetHttpResponse(FakeHttpResponse):
+    def __init__(self, body: bytes):
+        super().__init__(body)
+        self.first_read = True
+
+    def read(self, size: int = -1) -> bytes:
+        if self.first_read:
+            self.first_read = False
+            return self.body.read(4)
+        raise ConnectionResetError("connection reset")
 
 
 class SourceTests(unittest.TestCase):
@@ -146,6 +164,87 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
                     with self.assertRaisesRegex(OSError, "disk full"):
                         cache.get("https://example.org/data", ttl_seconds=3600)
             self.assertEqual(request.call_count, 1)
+
+    def test_http_cache_opens_large_responses_from_disk_and_reuses_them(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"release 1")) as request:
+                with cache.open_text("https://example.org/data", ttl_seconds=3600) as (stream, metadata):
+                    self.assertEqual(stream.read(), "release 1")
+                    self.assertFalse(metadata["cached"])
+                with cache.open_text("https://example.org/data", ttl_seconds=3600) as (stream, metadata):
+                    self.assertEqual(stream.read(), "release 1")
+                    self.assertTrue(metadata["cached"])
+            self.assertEqual(request.call_count, 1)
+
+    def test_http_cache_stream_uses_stale_response_after_transient_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"release 1")):
+                with cache.open_text("https://example.org/data", ttl_seconds=3600) as (stream, _):
+                    self.assertEqual(stream.read(), "release 1")
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", side_effect=urllib.error.URLError("offline")):
+                with cache.open_text("https://example.org/data", ttl_seconds=0) as (stream, metadata):
+                    self.assertEqual(stream.read(), "release 1")
+                    self.assertTrue(metadata["stale"])
+
+    def test_http_cache_stream_rejects_oversized_body_without_publishing_it(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            with patch("enzymeinfocollector.sources.MAX_RESPONSE_BYTES", 3):
+                with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"four")):
+                    with self.assertRaisesRegex(DataSourceError, "exceeds"):
+                        with cache.open_text("https://example.org/data", ttl_seconds=3600):
+                            self.fail("oversized response must not be opened")
+            self.assertEqual(list(Path(directory).glob("*.body")), [])
+            self.assertEqual(list(Path(directory).glob("*.json")), [])
+
+    def test_http_cache_stream_retries_interrupted_download_without_publishing_partial_body(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=1)
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", side_effect=[InterruptedHttpResponse(b"partial"), FakeHttpResponse(b"complete")]) as request:
+                with patch("enzymeinfocollector.sources.time.sleep"):
+                    with cache.open_text("https://example.org/data", ttl_seconds=3600) as (stream, _):
+                        self.assertEqual(stream.read(), "complete")
+            self.assertEqual(request.call_count, 2)
+            body = next(Path(directory).glob("*.body"))
+            self.assertEqual(body.read_bytes(), b"complete")
+
+    def test_http_cache_stream_retries_connection_reset_during_read(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=1)
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", side_effect=[ResetHttpResponse(b"partial"), FakeHttpResponse(b"complete")]) as request:
+                with patch("enzymeinfocollector.sources.time.sleep"):
+                    with cache.open_text("https://example.org/data", ttl_seconds=3600) as (stream, _):
+                        self.assertEqual(stream.read(), "complete")
+            self.assertEqual(request.call_count, 2)
+
+    def test_http_cache_stream_drops_old_metadata_if_new_metadata_cannot_be_published(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=0)
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"old", {"ETag": '"old"'})):
+                with cache.open_text("https://example.org/data", ttl_seconds=3600) as (stream, _):
+                    self.assertEqual(stream.read(), "old")
+            new_response = FakeHttpResponse(b"new", {"ETag": '"new"'})
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=new_response):
+                with patch("enzymeinfocollector.sources._atomic_write", side_effect=OSError("disk full")):
+                    with self.assertRaisesRegex(OSError, "disk full"):
+                        with cache.open_text("https://example.org/data", ttl_seconds=0, refresh=True):
+                            self.fail("cache publication should fail")
+            self.assertEqual(list(Path(directory).glob("*.json")), [])
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"recovered")) as request:
+                with cache.open_text("https://example.org/data", ttl_seconds=3600) as (stream, _):
+                    self.assertEqual(stream.read(), "recovered")
+            self.assertNotIn("If-None-Match", request.call_args.args[0].header_items())
+
+    def test_uniprot_merge_bounds_open_runs_and_keeps_accession_order(self) -> None:
+        cache = FakeCache("Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed\tSequence\n" + "".join(
+            f"P{number:05d}\tname\tprotein\tgene\torg\t1\t1.1.1.1\t1\treviewed\tM\n"
+            for number in (8, 2, 6, 1, 7, 3, 5, 4, 9)
+        ))
+        with patch("enzymeinfocollector.sources.UNIPROT_SORT_CHUNK_SIZE", 1), patch("enzymeinfocollector.sources.UNIPROT_MERGE_FAN_IN", 2):
+            with iter_uniprot("1.1.1.1", cache) as (proteins, _):  # type: ignore[arg-type]
+                self.assertEqual([protein["accession"] for protein in proteins], [f"P{number:05d}" for number in range(1, 10)])
 
     def test_uniprot_can_omit_sequences_and_filter_by_review_and_taxon(self) -> None:
         cache = FakeCache("""Entry\tEntry Name\tProtein names\tGene Names\tOrganism\tOrganism (ID)\tEC number\tLength\tReviewed

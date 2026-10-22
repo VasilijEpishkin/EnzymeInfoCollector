@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import csv
+import codecs
+import heapq
+import http.client
 import hashlib
 import io
 import json
 import os
+import pickle
 import re
+import tempfile
 import time
 import urllib.error
 import urllib.parse
@@ -16,7 +21,8 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from typing import Any
+from contextlib import ExitStack, contextmanager
+from typing import Any, Iterator, TextIO
 
 ENZYME_URL = "https://ftp.expasy.org/databases/enzyme/enzyme.dat"
 UNIPROT_URL = "https://rest.uniprot.org/uniprotkb/stream"
@@ -27,6 +33,8 @@ EC_PATTERN = re.compile(r"^[1-7]\.(?:\d+|n\d+)\.(?:\d+|n\d+)\.(?:\d+|n\d+)$", re
 UNIPROT_ACCESSION = re.compile(r"(?:[OPQ][0-9][A-Z0-9]{3}[0-9]|[A-NR-Z][0-9][A-Z][A-Z0-9]{2}[0-9]|[A-NR-Z][0-9][A-Z0-9]{8}[0-9])", re.IGNORECASE)
 MAX_RESPONSE_BYTES = 100 * 1024 * 1024
 RHEA_RESULT_LIMIT = 10_000
+UNIPROT_SORT_CHUNK_SIZE = 2_000
+UNIPROT_MERGE_FAN_IN = 64
 
 
 class DataSourceError(RuntimeError):
@@ -139,6 +147,128 @@ class HttpCache:
         if body and cached_meta and transient_failure and cached_age is not None and cached_age <= 30 * 24 * 60 * 60:
             return CachedResponse(body.decode("utf-8-sig"), {**cached_meta, "cached": True, "stale": True, "warning": str(last_error)})
         raise DataSourceError(f"Request failed for {urllib.parse.urlparse(url).netloc}: {last_error}") from last_error
+
+    @contextmanager
+    def open_text(self, url: str, *, ttl_seconds: int, refresh: bool = False) -> Iterator[tuple[TextIO, dict[str, Any]]]:
+        """Open a cached response as text without copying the complete body into memory."""
+        key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+        body_path = self.directory / f"{key}.body"
+        meta_path = self.directory / f"{key}.json"
+        cached_meta: dict[str, Any] | None = None
+        cached_age: float | None = None
+        fresh_cache = False
+        try:
+            cached_meta = json.loads(meta_path.read_text(encoding="utf-8"))
+            fetched_at = datetime.fromisoformat(cached_meta["fetched_at"].replace("Z", "+00:00"))
+            cached_age = max(0, (datetime.now(timezone.utc) - fetched_at).total_seconds())
+            if body_path.stat().st_size > MAX_RESPONSE_BYTES:
+                raise DataSourceError("Cached response exceeds 100 MiB")
+            _validate_utf8_file(body_path)
+            fresh_cache = not refresh and cached_age <= ttl_seconds
+        except (OSError, ValueError, KeyError, UnicodeDecodeError):
+            cached_meta = None
+            cached_age = None
+        if fresh_cache and cached_meta:
+            with body_path.open("r", encoding="utf-8-sig", newline="") as stream:
+                yield stream, {**cached_meta, "cached": True, "stale": False}
+            return
+
+        headers = {"User-Agent": self.user_agent, "Accept": "text/plain, text/tab-separated-values, */*"}
+        if cached_meta:
+            if cached_meta.get("etag"):
+                headers["If-None-Match"] = cached_meta["etag"]
+            if cached_meta.get("last_modified"):
+                headers["If-Modified-Since"] = cached_meta["last_modified"]
+        last_error: Exception | None = None
+        transient_failure = False
+        for attempt in range(self.retries + 1):
+            request = urllib.request.Request(url, headers=headers)
+            try:
+                response = urllib.request.urlopen(request, timeout=self.timeout)
+            except urllib.error.HTTPError as error:
+                if error.code == 304 and cached_meta and body_path.is_file():
+                    cached_meta["fetched_at"] = utc_now()
+                    _atomic_write(meta_path, json.dumps(cached_meta, sort_keys=True).encode("utf-8"))
+                    with body_path.open("r", encoding="utf-8-sig", newline="") as stream:
+                        yield stream, {**cached_meta, "cached": True, "stale": False}
+                    return
+                last_error = error
+                retry_after = error.headers.get("Retry-After")
+                transient_failure = error.code in {429, 500, 502, 503, 504}
+                if not transient_failure or attempt >= self.retries:
+                    break
+                delay = _retry_delay(retry_after, attempt)
+            except (urllib.error.URLError, TimeoutError) as error:
+                last_error = error
+                transient_failure = True
+                if attempt >= self.retries:
+                    break
+                delay = _retry_delay(None, attempt)
+            else:
+                self.directory.mkdir(parents=True, exist_ok=True)
+                descriptor, temp_name = tempfile.mkstemp(prefix=f".{body_path.name}.", suffix=".tmp", dir=self.directory)
+                temp_path = Path(temp_name)
+                decoder = codecs.getincrementaldecoder("utf-8-sig")()
+                size = 0
+                try:
+                    with os.fdopen(descriptor, "wb") as output, response:
+                        while True:
+                            try:
+                                chunk = response.read(1024 * 1024)
+                            except (OSError, http.client.HTTPException) as error:
+                                raise urllib.error.URLError(error) from error
+                            if not chunk:
+                                break
+                            size += len(chunk)
+                            if size > MAX_RESPONSE_BYTES:
+                                raise DataSourceError(f"Response from {urllib.parse.urlparse(url).netloc} exceeds 100 MiB")
+                            decoder.decode(chunk)
+                            output.write(chunk)
+                        decoder.decode(b"", final=True)
+                        output.flush()
+                        os.fsync(output.fileno())
+                    metadata = {
+                        "url": url,
+                        "fetched_at": utc_now(),
+                        "etag": response.headers.get("ETag"),
+                        "last_modified": response.headers.get("Last-Modified"),
+                        "cached": False,
+                        "stale": False,
+                    }
+                    # Drop validators before replacing the body so a failed metadata write
+                    # cannot associate old validators with the new response.
+                    meta_path.unlink(missing_ok=True)
+                    os.replace(temp_path, body_path)
+                    _atomic_write(meta_path, json.dumps(metadata, sort_keys=True).encode("utf-8"))
+                except UnicodeDecodeError as error:
+                    raise DataSourceError(f"Response from {urllib.parse.urlparse(url).netloc} is not UTF-8 text") from error
+                except (urllib.error.URLError, TimeoutError, http.client.HTTPException) as error:
+                    last_error = error
+                    transient_failure = True
+                    if attempt >= self.retries:
+                        break
+                    time.sleep(_retry_delay(None, attempt))
+                    continue
+                finally:
+                    temp_path.unlink(missing_ok=True)
+                with body_path.open("r", encoding="utf-8-sig", newline="") as stream:
+                    yield stream, metadata
+                return
+            time.sleep(delay)
+
+        if cached_meta and body_path.is_file() and transient_failure and cached_age is not None and cached_age <= 30 * 24 * 60 * 60:
+            with body_path.open("r", encoding="utf-8-sig", newline="") as stream:
+                yield stream, {**cached_meta, "cached": True, "stale": True, "warning": str(last_error)}
+            return
+        raise DataSourceError(f"Request failed for {urllib.parse.urlparse(url).netloc}: {last_error}") from last_error
+
+
+def _validate_utf8_file(path: Path) -> None:
+    decoder = codecs.getincrementaldecoder("utf-8-sig")()
+    with path.open("rb") as stream:
+        while chunk := stream.read(1024 * 1024):
+            decoder.decode(chunk)
+    decoder.decode(b"", final=True)
 
 
 def _retry_delay(retry_after: str | None, attempt: int) -> float:
@@ -263,6 +393,117 @@ def fetch_uniprot(
         })
     records.sort(key=lambda item: item["accession"])
     return records, response.metadata
+
+
+@contextmanager
+def iter_uniprot(
+    ec_number: str,
+    cache: HttpCache,
+    *,
+    refresh: bool = False,
+    include_sequence: bool = True,
+    reviewed_only: bool = False,
+    taxon_ids: list[int] | None = None,
+) -> Iterator[tuple[Iterator[dict[str, Any]], dict[str, Any]]]:
+    """Yield UniProt proteins sorted by accession using bounded in-memory runs."""
+    if taxon_ids and any(taxon_id <= 0 for taxon_id in taxon_ids):
+        raise ValueError("Taxonomy IDs must be positive integers")
+    fields = "accession,id,protein_name,gene_names,organism_name,organism_id,ec,sequence,length,reviewed"
+    if not include_sequence:
+        fields = fields.removesuffix(",sequence,length,reviewed") + ",length,reviewed"
+    query = f"ec:{ec_number}"
+    if reviewed_only:
+        query += " AND reviewed:true"
+    if taxon_ids:
+        query += " AND (" + " OR ".join(f"taxonomy_id:{taxon_id}" for taxon_id in sorted(set(taxon_ids))) + ")"
+    params = urllib.parse.urlencode({"query": query, "fields": fields, "format": "tsv"})
+    url = f"{UNIPROT_URL}?{params}"
+    with tempfile.TemporaryDirectory(prefix="enzymeinfocollector-sort-") as directory:
+        if hasattr(cache, "open_text"):
+            with cache.open_text(url, ttl_seconds=24 * 60 * 60, refresh=refresh) as (stream, metadata):  # type: ignore[attr-defined]
+                run_paths = _build_uniprot_runs(stream, Path(directory))
+        else:
+            response = cache.get(url, ttl_seconds=24 * 60 * 60, refresh=refresh)
+            metadata = response.metadata
+            run_paths = _build_uniprot_runs(io.StringIO(response.text), Path(directory))
+            del response
+
+        while len(run_paths) > UNIPROT_MERGE_FAN_IN:
+            run_paths = _merge_uniprot_runs(run_paths, Path(directory))
+        with ExitStack() as stack:
+            streams = [stack.enter_context(path.open("rb")) for path in run_paths]
+            sorted_records = heapq.merge(
+                *(_read_uniprot_run(stream) for stream in streams),
+                key=lambda record: record["accession"],
+            )
+            yield sorted_records, metadata
+
+
+def _build_uniprot_runs(stream: TextIO, directory: Path) -> list[Path]:
+    reader = csv.DictReader(stream, delimiter="\t")
+    if not reader.fieldnames or not any(name in reader.fieldnames for name in ("Entry", "accession")):
+        raise DataSourceError("UniProt response did not contain the expected TSV header")
+    run_paths: list[Path] = []
+    chunk: list[dict[str, Any]] = []
+    for row in reader:
+        accession = _field(row, "Entry", "accession")
+        if not accession:
+            continue
+        chunk.append({
+            "accession": accession,
+            "entry_name": _field(row, "Entry Name", "id"),
+            "protein_name": _field(row, "Protein names", "protein_name"),
+            "gene_names": _split_gene_names(_field(row, "Gene Names", "gene_names")),
+            "organism": _field(row, "Organism", "organism_name"),
+            "organism_id": _field(row, "Organism (ID)", "Organism ID", "organism_id"),
+            "ec_numbers": _split_values(_field(row, "EC number", "ec")),
+            "length": _int_or_none(_field(row, "Length", "length")),
+            "reviewed": _field(row, "Reviewed", "reviewed").casefold() == "reviewed",
+            "sequence": _field(row, "Sequence", "sequence"),
+        })
+        if len(chunk) == UNIPROT_SORT_CHUNK_SIZE:
+            run_paths.append(_write_uniprot_run(directory, len(run_paths), chunk))
+            chunk = []
+    if chunk:
+        run_paths.append(_write_uniprot_run(directory, len(run_paths), chunk))
+    return run_paths
+
+
+def _write_uniprot_run(directory: Path, index: int, records: list[dict[str, Any]]) -> Path:
+    path = directory / f"{index}.pickle"
+    records.sort(key=lambda item: item["accession"])
+    with path.open("wb") as stream:
+        for record in records:
+            pickle.dump(record, stream, protocol=pickle.HIGHEST_PROTOCOL)
+    return path
+
+
+def _read_uniprot_run(stream: Any) -> Iterator[dict[str, Any]]:
+    while True:
+        try:
+            yield pickle.load(stream)
+        except EOFError:
+            return
+
+
+def _merge_uniprot_runs(paths: list[Path], directory: Path) -> list[Path]:
+    merged_paths = []
+    for group_index in range(0, len(paths), UNIPROT_MERGE_FAN_IN):
+        group = paths[group_index:group_index + UNIPROT_MERGE_FAN_IN]
+        target = directory / f"merge-{len(merged_paths)}-{group[0].stem}.pickle"
+        with ExitStack() as stack:
+            streams = [stack.enter_context(path.open("rb")) for path in group]
+            merged = heapq.merge(
+                *(_read_uniprot_run(stream) for stream in streams),
+                key=lambda record: record["accession"],
+            )
+            with target.open("wb") as output:
+                for record in merged:
+                    pickle.dump(record, output, protocol=pickle.HIGHEST_PROTOCOL)
+        merged_paths.append(target)
+        for path in group:
+            path.unlink()
+    return merged_paths
 
 
 def fetch_rhea(ec_number: str, cache: HttpCache, *, refresh: bool = False) -> tuple[list[dict[str, Any]], dict[str, Any]]:

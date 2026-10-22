@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Callable
 
 from .sources import (
     ENZYME_URL,
@@ -11,6 +11,7 @@ from .sources import (
     fetch_reaction_directions,
     fetch_rhea,
     fetch_uniprot,
+    iter_uniprot,
     find_enzyme_entries,
     parse_enzyme_dat,
     validate_ec_number,
@@ -57,7 +58,12 @@ class EnzymeCollector:
             self._smiles, self._smiles_source = fetch_reaction_smiles(self.cache, refresh=self.refresh)
             self._directions, self._directions_source = fetch_reaction_directions(self.cache, refresh=self.refresh)
 
-    def collect(self, queries: list[tuple[str, str]]) -> dict[str, Any]:
+    def collect(
+        self,
+        queries: list[tuple[str, str]],
+        *,
+        on_record: Callable[[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, str, str, dict[str, Any] | None], None] | None = None,
+    ) -> dict[str, Any]:
         self._load_enzyme_entries()
         results = []
         for query_type, raw_value in queries:
@@ -80,20 +86,48 @@ class EnzymeCollector:
                 matches = find_enzyme_entries(self._enzyme_entries or [], value)
 
             if not matches:
-                results.append({"input": {"type": query_type, "value": value}, "status": "not_found", "enzymes": []})
+                result = {"input": {"type": query_type, "value": value}, "status": "not_found", "enzymes": []}
+                results.append(result)
+                if on_record:
+                    on_record(result, None, None, "", "", None)
                 continue
 
+            result_info = {"input": {"type": query_type, "value": value}, "status": "found"}
             enzymes = []
             for enzyme in matches:
                 if enzyme["status"] == "transferred":
                     source_result = self._enzyme_result(enzyme, [], [], None, None)
-                    source_result["resolution"] = self._resolve_transfers(enzyme)
+                    if on_record:
+                        resolution, targets = self._transfer_plan(enzyme)
+                        source_result["resolution"] = resolution
+                        on_record(result_info, source_result, None, "enzyme", "", resolution)
+                        for target, target_paths in targets:
+                            target_result = self._stream_active_enzyme(
+                                target,
+                                lambda record, protein: on_record(
+                                    result_info, record, protein, "resolved_target", enzyme["ec_number"], resolution
+                                ),
+                                record_extra={"requested_ec": enzyme["ec_number"], "resolution_paths": target_paths},
+                            )
+                            resolution["resolved_enzymes"].append(target_result)
+                    else:
+                        source_result["resolution"] = self._resolve_transfers(enzyme)
                     enzymes.append(source_result)
                     continue
                 if enzyme["status"] != "active":
-                    enzymes.append(self._enzyme_result(enzyme, [], [], None, None))
+                    record = self._enzyme_result(enzyme, [], [], None, None)
+                    enzymes.append(record)
+                    if on_record:
+                        on_record(result_info, record, None, "enzyme", "", None)
                     continue
-                enzymes.append(self._collect_active_enzyme(enzyme))
+                if on_record:
+                    record = self._stream_active_enzyme(
+                        enzyme,
+                        lambda active, protein: on_record(result_info, active, protein, "enzyme", "", None),
+                    )
+                    enzymes.append(record)
+                else:
+                    enzymes.append(self._collect_active_enzyme(enzyme))
 
             results.append({
                 "input": {"type": query_type, "value": value},
@@ -143,7 +177,56 @@ class EnzymeCollector:
             )
         return self._active_results[ec_number.casefold()]
 
+    def _stream_active_enzyme(
+        self,
+        enzyme: dict[str, Any],
+        on_protein: Callable[[dict[str, Any], dict[str, Any] | None], None],
+        *,
+        record_extra: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        reactions, reaction_source = fetch_rhea(enzyme["ec_number"], self.cache, refresh=self.refresh)
+        if reactions:
+            self._load_smiles()
+        smiles_by_id = self._smiles or {}
+        for reaction in reactions:
+            reaction_id = reaction["rhea_id"]
+            reaction["reaction_smiles"] = smiles_by_id.get(reaction_id)
+            directed_ids = (self._directions or {}).get(reaction_id, {})
+            reaction["reaction_smiles_directions"] = {
+                direction: smiles_by_id[identifier]
+                for direction, identifier in directed_ids.items()
+                if identifier in smiles_by_id
+            }
+        with iter_uniprot(
+            enzyme["ec_number"],
+            self.cache,
+            refresh=self.refresh,
+            include_sequence=self.include_sequences,
+            reviewed_only=self.reviewed_only,
+            taxon_ids=self.taxon_ids,
+        ) as (proteins, protein_source):
+            record = self._enzyme_result(enzyme, [], reactions, protein_source, reaction_source)
+            if record_extra:
+                record.update(record_extra)
+            found = False
+            for protein in proteins:
+                found = True
+                on_protein(record, protein)
+            if not found:
+                on_protein(record, None)
+            return record
+
     def _resolve_transfers(self, source: dict[str, Any]) -> dict[str, Any]:
+        resolution, targets = self._transfer_plan(source)
+        resolution["resolved_enzymes"] = [
+            {**self._collect_active_enzyme(entry), "requested_ec": source["ec_number"], "resolution_paths": paths}
+            for entry, paths in targets
+        ]
+        return resolution
+
+    def _transfer_plan(
+        self, source: dict[str, Any]
+    ) -> tuple[dict[str, Any], list[tuple[dict[str, Any], list[list[str]]]]]:
         paths: list[dict[str, Any]] = []
         redirect_entries: dict[str, dict[str, Any]] = {}
         terminal_paths: dict[str, list[list[str]]] = {}
@@ -181,17 +264,16 @@ class EnzymeCollector:
                 else:
                     paths.append({"ec_numbers": path, "status": "unresolved_transfer"})
 
-        resolved = [
-            {**self._collect_active_enzyme((self._enzyme_index or {})[ec.casefold()]),
-             "requested_ec": source["ec_number"], "resolution_paths": target_paths}
+        targets = [
+            ((self._enzyme_index or {})[ec.casefold()], target_paths)
             for ec, target_paths in sorted(terminal_paths.items())
         ]
         unresolved = [path for path in paths if path["status"] in {"missing", "deleted", "cycle", "unresolved_transfer"}]
-        if path_limit_reached or (resolved and unresolved):
+        if path_limit_reached or (targets and unresolved):
             status = "partial"
         else:
-            status = "resolved" if resolved else "unresolved"
-        return {
+            status = "resolved" if targets else "unresolved"
+        resolution = {
             "requested_ec": source["ec_number"],
             "status": status,
             "paths": paths,
@@ -199,8 +281,9 @@ class EnzymeCollector:
             "terminal_ec_numbers": sorted(terminal_paths),
             "redirect_entries": list(redirect_entries.values()),
             "unresolved_targets": unresolved,
-            "resolved_enzymes": resolved,
+            "resolved_enzymes": [],
         }
+        return resolution, targets
 
     def _enzyme_result(
         self,

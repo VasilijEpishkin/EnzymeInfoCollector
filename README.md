@@ -1,6 +1,6 @@
 # EnzymeInfoCollector
 
-EnzymeInfoCollector gathers a reproducible enzyme record from three authoritative resources: ExPASy ENZYME for nomenclature and EC entries, UniProtKB for protein annotations and sequences, and Rhea for curated reactions. It writes a local JSON or CSV file and records where each source response came from.
+EnzymeInfoCollector gathers a reproducible enzyme record from three authoritative resources: ExPASy ENZYME for nomenclature and EC entries, UniProtKB for protein annotations and sequences, and Rhea for curated reactions. It writes local JSON, CSV, or FASTA files and records where each source response came from.
 
 The project is a client-side data collector, not a replacement for BRENDA, ExplorEnz, Open Enzyme Database, or CLEAN DB. It uses their complementary identifiers to assemble a small, traceable dataset for research workflows.
 
@@ -81,6 +81,8 @@ CSV output uses one row per UniProt protein for each matched EC entry. Its exist
 - UniProt accessions, protein/gene names, organism, reviewed status, sequence length, and amino acid sequence when requested
 - Rhea reaction ID, equation, ChEBI participant names and IDs, and reaction SMILES when Rhea provides a matching directed reaction record. Undirected master IDs include available left-to-right/right-to-left SMILES in `reaction_smiles_directions`.
 - Per-source request URL, retrieval time, cache status, and stale-cache warning where applicable
+
+CSV and FASTA CLI exports process proteins in bounded batches and use temporary disk runs to preserve accession order within each EC result. The runs use the system temporary directory and can require more disk space than the cached UniProt response. The final output is still replaced atomically after collection succeeds. This limits memory use for large UniProt responses at the cost of additional temporary disk I/O; JSON and the Python `collect()` API retain their full in-memory behavior.
 
 Reaction SMILES and the direction mapping are read from Rhea's published TSV files. They are not reconstructed by assuming participant order from the human-readable equation. An undirected reaction has a null `reaction_smiles` value and a `reaction_smiles_directions` object when directed forms are available. A reaction with no matching SMILES record has a null value and an empty directions object.
 

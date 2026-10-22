@@ -7,8 +7,9 @@ import tempfile
 import unittest
 import urllib.parse
 from pathlib import Path
+from unittest.mock import patch
 
-from enzymeinfocollector.cli import _read_query_file, main, write_output
+from enzymeinfocollector.cli import _read_query_file, main, write_output, write_stream_output
 from enzymeinfocollector.collector import EnzymeCollector
 from enzymeinfocollector.sources import CachedResponse
 
@@ -54,6 +55,15 @@ class TransferCache:
         else:
             raise AssertionError(f"Unexpected URL {url}")
         return CachedResponse(body, {"url": url, "fetched_at": "2026-10-22T00:00:00Z", "cached": False, "stale": False})
+
+
+class UnsortedPipelineCache(PipelineCache):
+    def get(self, url: str, **kwargs: object) -> CachedResponse:
+        response = super().get(url, **kwargs)
+        if "uniprotkb/stream" in url:
+            header, *rows = response.text.splitlines()
+            return CachedResponse("\n".join([header, *reversed(rows)]) + "\n", response.metadata)
+        return response
 
 
 class CliTests(unittest.TestCase):
@@ -122,6 +132,69 @@ class CliTests(unittest.TestCase):
             records = path.read_text(encoding="utf-8").splitlines()
         self.assertEqual(records[0], ">P00330 EC=1.1.1.1 OS=Saccharomyces_cerevisiae source=UniProtKB")
         self.assertEqual(records[1], "MSTAGKVIKCK")
+
+    def test_streamed_exports_match_legacy_order_and_transfer_rows(self) -> None:
+        scenarios = [
+            (UnsortedPipelineCache(), [("ec", "1.1.1.1")]),
+            (TransferCache("""ID   7.9.9.9
+DE   Transferred entry: 7.9.9.1 and 7.9.9.2 and 7.9.9.3.
+//
+ID   7.9.9.1
+DE   Transferred entry: 7.9.9.5.
+//
+ID   7.9.9.2
+DE   Transferred entry: 7.9.9.5.
+//
+ID   7.9.9.3
+DE   Deleted entry.
+//
+ID   7.9.9.5
+DE   Terminal enzyme.
+//
+"""), [("ec", "7.9.9.9")]),
+        ]
+        for cache, queries in scenarios:
+            with self.subTest(queries=queries), tempfile.TemporaryDirectory() as directory:
+                legacy_payload = EnzymeCollector(cache).collect(queries)  # type: ignore[arg-type]
+                for suffix, output_format in (("csv", "csv"), ("fasta", "fasta")):
+                    legacy_path = Path(directory) / f"legacy.{suffix}"
+                    streamed_path = Path(directory) / f"streamed.{suffix}"
+                    write_output(legacy_path, output_format, legacy_payload)
+                    with patch("enzymeinfocollector.sources.UNIPROT_SORT_CHUNK_SIZE", 1):
+                        write_stream_output(streamed_path, output_format, EnzymeCollector(cache), queries)  # type: ignore[arg-type]
+                    self.assertEqual(streamed_path.read_bytes(), legacy_path.read_bytes())
+
+    def test_streamed_export_preserves_destination_on_collection_failure(self) -> None:
+        class BrokenCache:
+            def get(self, *_args: object, **_kwargs: object) -> CachedResponse:
+                raise OSError("source unavailable")
+
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.csv"
+            path.write_bytes(b"previous output\n")
+            with self.assertRaisesRegex(OSError, "source unavailable"):
+                write_stream_output(path, "csv", EnzymeCollector(BrokenCache()), [("ec", "1.1.1.1")])  # type: ignore[arg-type]
+            self.assertEqual(path.read_bytes(), b"previous output\n")
+            self.assertEqual(list(Path(directory).glob(".result.csv.*.tmp")), [])
+
+    def test_streamed_export_preserves_destination_on_mid_write_failure(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.csv"
+            path.write_bytes(b"previous output\n")
+            with patch("enzymeinfocollector.cli._csv_export_row", side_effect=OSError("disk full")):
+                with self.assertRaisesRegex(OSError, "disk full"):
+                    write_stream_output(path, "csv", EnzymeCollector(PipelineCache()), [("ec", "1.1.1.1")])  # type: ignore[arg-type]
+            self.assertEqual(path.read_bytes(), b"previous output\n")
+            self.assertEqual(list(Path(directory).glob(".result.csv.*.tmp")), [])
+
+    def test_cli_routes_csv_exports_through_streaming_writer(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "result.csv"
+            with patch("enzymeinfocollector.cli.HttpCache", return_value=PipelineCache()):
+                self.assertEqual(main(["--ec", "1.1.1.1", "--output", str(path)]), 0)
+            with path.open(encoding="utf-8", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+        self.assertEqual([row["uniprot_accession"] for row in rows], ["P00330", "P12345"])
 
     def test_collector_passes_server_side_uniprot_filters(self) -> None:
         cache = PipelineCache()
