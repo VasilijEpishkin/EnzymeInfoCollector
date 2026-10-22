@@ -6,7 +6,6 @@ on:
 
 jobs:
   unittest:
-    runs-on: ubuntu-latest
     strategy:
       matrix:
         include:
