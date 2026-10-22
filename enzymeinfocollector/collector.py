@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from collections import Counter
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from typing import Any, Callable
 
 from .sources import (
@@ -64,7 +67,22 @@ class EnzymeCollector:
         *,
         on_record: Callable[[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, str, str, dict[str, Any] | None], None] | None = None,
     ) -> dict[str, Any]:
+        """Collect results; callback mode streams proteins and returns metadata-only enzyme records."""
+        if on_record is None:
+            return self._collect(queries)
+        with TemporaryDirectory(prefix="enzymeinfocollector-collect-") as directory:
+            return self._collect(queries, on_record, Path(directory), {}, {})
+
+    def _collect(
+        self,
+        queries: list[tuple[str, str]],
+        on_record: Callable[[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None, str, str, dict[str, Any] | None], None] | None = None,
+        sort_directory: Path | None = None,
+        sort_cache: dict[str, tuple[list[Path], dict[str, Any]]] | None = None,
+        reaction_cache: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None,
+    ) -> dict[str, Any]:
         self._load_enzyme_entries()
+        reused_ecs = self._stream_reused_ecs(queries) if on_record else set()
         results = []
         for query_type, raw_value in queries:
             if query_type == "ec":
@@ -108,6 +126,10 @@ class EnzymeCollector:
                                     result_info, record, protein, "resolved_target", enzyme["ec_number"], resolution
                                 ),
                                 record_extra={"requested_ec": enzyme["ec_number"], "resolution_paths": target_paths},
+                                sort_directory=sort_directory,
+                                sort_cache=sort_cache,
+                                reaction_cache=reaction_cache,
+                                reused_ecs=reused_ecs,
                             )
                             resolution["resolved_enzymes"].append(target_result)
                     else:
@@ -124,6 +146,10 @@ class EnzymeCollector:
                     record = self._stream_active_enzyme(
                         enzyme,
                         lambda active, protein: on_record(result_info, active, protein, "enzyme", "", None),
+                        sort_directory=sort_directory,
+                        sort_cache=sort_cache,
+                        reaction_cache=reaction_cache,
+                        reused_ecs=reused_ecs,
                     )
                     enzymes.append(record)
                 else:
@@ -147,6 +173,22 @@ class EnzymeCollector:
             },
             "results": results,
         }
+
+    def _stream_reused_ecs(self, queries: list[tuple[str, str]]) -> set[str]:
+        occurrences: Counter[str] = Counter()
+        for query_type, raw_value in queries:
+            if query_type == "ec":
+                match = (self._enzyme_index or {}).get(validate_ec_number(raw_value).casefold())
+                matches = [match] if match else []
+            else:
+                matches = find_enzyme_entries(self._enzyme_entries or [], raw_value.strip())
+            for enzyme in matches:
+                if enzyme["status"] == "active":
+                    occurrences[enzyme["ec_number"].casefold()] += 1
+                elif enzyme["status"] == "transferred":
+                    _, targets = self._transfer_plan(enzyme)
+                    occurrences.update(target["ec_number"].casefold() for target, _ in targets)
+        return {ec_number for ec_number, count in occurrences.items() if count > 1}
 
     def _collect_active_enzyme(self, enzyme: dict[str, Any]) -> dict[str, Any]:
         ec_number = enzyme["ec_number"]
@@ -183,20 +225,33 @@ class EnzymeCollector:
         on_protein: Callable[[dict[str, Any], dict[str, Any] | None], None],
         *,
         record_extra: dict[str, Any] | None = None,
+        sort_directory: Path | None = None,
+        sort_cache: dict[str, tuple[list[Path], dict[str, Any]]] | None = None,
+        reaction_cache: dict[str, tuple[list[dict[str, Any]], dict[str, Any]]] | None = None,
+        reused_ecs: set[str] | None = None,
     ) -> dict[str, Any]:
-        reactions, reaction_source = fetch_rhea(enzyme["ec_number"], self.cache, refresh=self.refresh)
-        if reactions:
-            self._load_smiles()
-        smiles_by_id = self._smiles or {}
-        for reaction in reactions:
-            reaction_id = reaction["rhea_id"]
-            reaction["reaction_smiles"] = smiles_by_id.get(reaction_id)
-            directed_ids = (self._directions or {}).get(reaction_id, {})
-            reaction["reaction_smiles_directions"] = {
-                direction: smiles_by_id[identifier]
-                for direction, identifier in directed_ids.items()
-                if identifier in smiles_by_id
-            }
+        ec_key = enzyme["ec_number"].casefold()
+        reuse = reused_ecs is not None and ec_key in reused_ecs
+        reaction_cache = reaction_cache if reuse else None
+        cached_reactions = reaction_cache.get(ec_key) if reaction_cache is not None else None
+        if cached_reactions is None:
+            reactions, reaction_source = fetch_rhea(enzyme["ec_number"], self.cache, refresh=self.refresh)
+            if reactions:
+                self._load_smiles()
+            smiles_by_id = self._smiles or {}
+            for reaction in reactions:
+                reaction_id = reaction["rhea_id"]
+                reaction["reaction_smiles"] = smiles_by_id.get(reaction_id)
+                directed_ids = (self._directions or {}).get(reaction_id, {})
+                reaction["reaction_smiles_directions"] = {
+                    direction: smiles_by_id[identifier]
+                    for direction, identifier in directed_ids.items()
+                    if identifier in smiles_by_id
+                }
+            if reaction_cache is not None:
+                reaction_cache[ec_key] = (reactions, reaction_source)
+        else:
+            reactions, reaction_source = cached_reactions
         with iter_uniprot(
             enzyme["ec_number"],
             self.cache,
@@ -204,6 +259,8 @@ class EnzymeCollector:
             include_sequence=self.include_sequences,
             reviewed_only=self.reviewed_only,
             taxon_ids=self.taxon_ids,
+            sort_cache=sort_cache if reuse else None,
+            sort_directory=sort_directory if reuse else None,
         ) as (proteins, protein_source):
             record = self._enzyme_result(enzyme, [], reactions, protein_source, reaction_source)
             if record_extra:

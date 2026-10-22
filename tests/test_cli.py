@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from enzymeinfocollector.cli import _read_query_file, main, write_output, write_stream_output
 from enzymeinfocollector.collector import EnzymeCollector
+from enzymeinfocollector import sources
 from enzymeinfocollector.sources import CachedResponse
 
 
@@ -63,6 +64,17 @@ class UnsortedPipelineCache(PipelineCache):
         if "uniprotkb/stream" in url:
             header, *rows = response.text.splitlines()
             return CachedResponse("\n".join([header, *reversed(rows)]) + "\n", response.metadata)
+        return response
+
+
+class AliasPipelineCache(UnsortedPipelineCache):
+    def get(self, url: str, **kwargs: object) -> CachedResponse:
+        response = super().get(url, **kwargs)
+        if url.endswith("/enzyme.dat"):
+            return CachedResponse(response.text.replace(
+                "DE   Alcohol dehydrogenase.\n",
+                "DE   Alcohol dehydrogenase.\nAN   Alcohol:NAD+ oxidoreductase.\n",
+            ), response.metadata)
         return response
 
 
@@ -163,6 +175,62 @@ DE   Terminal enzyme.
                     with patch("enzymeinfocollector.sources.UNIPROT_SORT_CHUNK_SIZE", 1):
                         write_stream_output(streamed_path, output_format, EnzymeCollector(cache), queries)  # type: ignore[arg-type]
                     self.assertEqual(streamed_path.read_bytes(), legacy_path.read_bytes())
+
+    def test_streamed_alias_queries_reuse_sorted_runs_and_reactions(self) -> None:
+        queries = [
+            ("enzyme", "Alcohol dehydrogenase"),
+            ("enzyme", "Alcohol:NAD+ oxidoreductase"),
+        ]
+        legacy = EnzymeCollector(AliasPipelineCache()).collect(queries)  # type: ignore[arg-type]
+        self.assertEqual([item["input"]["value"] for item in legacy["results"]], [value for _, value in queries])
+        with tempfile.TemporaryDirectory() as directory:
+            for suffix, output_format in (("csv", "csv"), ("fasta", "fasta")):
+                legacy_path = Path(directory) / f"legacy.{suffix}"
+                streamed_path = Path(directory) / f"streamed.{suffix}"
+                write_output(legacy_path, output_format, legacy)
+                cache = AliasPipelineCache()
+                with patch("enzymeinfocollector.sources.UNIPROT_SORT_CHUNK_SIZE", 1), patch(
+                    "enzymeinfocollector.sources._build_uniprot_runs",
+                    wraps=sources._build_uniprot_runs,
+                ) as build_runs:
+                    write_stream_output(streamed_path, output_format, EnzymeCollector(cache), queries)  # type: ignore[arg-type]
+                self.assertEqual(streamed_path.read_bytes(), legacy_path.read_bytes())
+                self.assertEqual(build_runs.call_count, 1)
+                self.assertEqual(sum("uniprotkb/stream" in url for url in cache.urls), 1)
+                self.assertEqual(sum("rhea-db.org/rhea/" in url for url in cache.urls), 1)
+            with Path(directory, "legacy.csv").open(encoding="utf-8", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+        self.assertEqual([row["input_value"] for row in rows], [queries[0][1]] * 2 + [queries[1][1]] * 2)
+
+    def test_streamed_transfer_sources_reuse_terminal_ec_runs(self) -> None:
+        entries = """ID   7.9.9.9
+DE   Transferred entry: 7.9.9.5.
+//
+ID   7.9.9.8
+DE   Transferred entry: 7.9.9.5.
+//
+ID   7.9.9.5
+DE   Terminal enzyme.
+//
+"""
+        queries = [("ec", "7.9.9.9"), ("ec", "7.9.9.8")]
+        legacy = EnzymeCollector(TransferCache(entries)).collect(queries)  # type: ignore[arg-type]
+        with tempfile.TemporaryDirectory() as directory:
+            legacy_path = Path(directory) / "legacy.csv"
+            streamed_path = Path(directory) / "streamed.csv"
+            write_output(legacy_path, "csv", legacy)
+            cache = TransferCache(entries)
+            with patch("enzymeinfocollector.sources._build_uniprot_runs", wraps=sources._build_uniprot_runs) as build_runs:
+                write_stream_output(streamed_path, "csv", EnzymeCollector(cache), queries)  # type: ignore[arg-type]
+            self.assertEqual(streamed_path.read_bytes(), legacy_path.read_bytes())
+            self.assertEqual(build_runs.call_count, 1)
+            self.assertEqual(sum("uniprotkb/stream" in url for url in cache.urls), 1)
+            with streamed_path.open(encoding="utf-8", newline="") as stream:
+                rows = list(csv.DictReader(stream))
+        target_rows = [row for row in rows if row["record_kind"] == "resolved_target"]
+        self.assertEqual([row["input_value"] for row in rows], ["7.9.9.9"] * 2 + ["7.9.9.8"] * 2)
+        self.assertEqual([row["requested_ec"] for row in target_rows], ["7.9.9.9", "7.9.9.8"])
+        self.assertEqual({row["ec_number"] for row in target_rows}, {"7.9.9.5"})
 
     def test_streamed_export_preserves_destination_on_collection_failure(self) -> None:
         class BrokenCache:

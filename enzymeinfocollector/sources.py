@@ -455,6 +455,8 @@ def iter_uniprot(
     include_sequence: bool = True,
     reviewed_only: bool = False,
     taxon_ids: list[int] | None = None,
+    sort_cache: dict[str, tuple[list[Path], dict[str, Any]]] | None = None,
+    sort_directory: Path | None = None,
 ) -> Iterator[tuple[Iterator[dict[str, Any]], dict[str, Any]]]:
     """Yield UniProt proteins sorted by accession using bounded in-memory runs."""
     if taxon_ids and any(taxon_id <= 0 for taxon_id in taxon_ids):
@@ -469,16 +471,32 @@ def iter_uniprot(
         query += " AND (" + " OR ".join(f"taxonomy_id:{taxon_id}" for taxon_id in sorted(set(taxon_ids))) + ")"
     params = urllib.parse.urlencode({"query": query, "fields": fields, "format": "tsv"})
     url = f"{UNIPROT_URL}?{params}"
-    with tempfile.TemporaryDirectory(prefix="enzymeinfocollector-sort-") as directory:
-        if hasattr(cache, "open_text"):
-            with cache.open_text(url, ttl_seconds=24 * 60 * 60, refresh=refresh) as (stream, metadata):  # type: ignore[attr-defined]
-                run_paths = _build_uniprot_runs(stream, Path(directory))
-        else:
-            response = cache.get(url, ttl_seconds=24 * 60 * 60, refresh=refresh)
-            metadata = response.metadata
-            run_paths = _build_uniprot_runs(io.StringIO(response.text), Path(directory))
-            del response
 
+    if sort_cache is not None:
+        if sort_directory is None:
+            raise ValueError("sort_directory is required when sort_cache is provided")
+        cached = sort_cache.get(url)
+        if cached is None:
+            directory = sort_directory / hashlib.sha256(url.encode("utf-8")).hexdigest()
+            directory.mkdir(parents=True, exist_ok=True)
+            run_paths, metadata = _build_uniprot_sort_runs(
+                url, cache, directory, refresh=refresh
+            )
+            while len(run_paths) > UNIPROT_MERGE_FAN_IN:
+                run_paths = _merge_uniprot_runs(run_paths, directory)
+            cached = (run_paths, metadata)
+            sort_cache[url] = cached
+        run_paths, metadata = cached
+        with ExitStack() as stack:
+            streams = [stack.enter_context(path.open("rb")) for path in run_paths]
+            yield heapq.merge(
+                *(_read_uniprot_run(stream) for stream in streams),
+                key=lambda record: record["accession"],
+            ), metadata
+        return
+
+    with tempfile.TemporaryDirectory(prefix="enzymeinfocollector-sort-") as directory:
+        run_paths, metadata = _build_uniprot_sort_runs(url, cache, Path(directory), refresh=refresh)
         while len(run_paths) > UNIPROT_MERGE_FAN_IN:
             run_paths = _merge_uniprot_runs(run_paths, Path(directory))
         with ExitStack() as stack:
@@ -488,6 +506,19 @@ def iter_uniprot(
                 key=lambda record: record["accession"],
             )
             yield sorted_records, metadata
+
+
+def _build_uniprot_sort_runs(
+    url: str, cache: HttpCache, directory: Path, *, refresh: bool
+) -> tuple[list[Path], dict[str, Any]]:
+    if hasattr(cache, "open_text"):
+        with cache.open_text(url, ttl_seconds=24 * 60 * 60, refresh=refresh) as (stream, metadata):  # type: ignore[attr-defined]
+            run_paths = _build_uniprot_runs(stream, directory)
+    else:
+        response = cache.get(url, ttl_seconds=24 * 60 * 60, refresh=refresh)
+        metadata = response.metadata
+        run_paths = _build_uniprot_runs(io.StringIO(response.text), directory)
+    return run_paths, metadata
 
 
 def _build_uniprot_runs(stream: TextIO, directory: Path) -> list[Path]:
