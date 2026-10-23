@@ -10,6 +10,7 @@ import http.client
 import hashlib
 import io
 import json
+import math
 import os
 import pickle
 import re
@@ -113,6 +114,12 @@ def _read_cache_metadata(path: Path) -> dict[str, Any]:
     metadata = json.loads(path.read_text(encoding="utf-8"))
     if not isinstance(metadata, dict) or not isinstance(metadata.get("fetched_at"), str):
         raise ValueError("Invalid cache metadata")
+    for field in ("etag", "last_modified"):
+        value = metadata.get(field)
+        if value is not None and (
+            not isinstance(value, str) or any(ord(character) < 32 or ord(character) == 127 for character in value)
+        ):
+            metadata.pop(field, None)
     return metadata
 
 
@@ -181,7 +188,9 @@ class HttpCache:
                 if not transient_failure or attempt >= self.retries:
                     break
                 delay = _retry_delay(retry_after, attempt)
-            except (urllib.error.URLError, TimeoutError) as error:
+                if delay is None:
+                    break
+            except (urllib.error.URLError, http.client.HTTPException, OSError) as error:
                 last_error = error
                 transient_failure = True
                 if attempt >= self.retries:
@@ -202,7 +211,23 @@ class HttpCache:
                     "cached": False,
                     "stale": False,
                 }
-                _atomic_write(body_path, payload)
+                body_temp = body_path.with_name(f".{body_path.name}.{os.getpid()}.tmp")
+                try:
+                    with body_temp.open("wb") as stream:
+                        stream.write(payload)
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    # Old validators must not be paired with a newly published body.
+                    old_metadata = meta_path.read_bytes() if meta_path.exists() else None
+                    meta_path.unlink(missing_ok=True)
+                    try:
+                        os.replace(body_temp, body_path)
+                    except OSError:
+                        if old_metadata is not None:
+                            _atomic_write(meta_path, old_metadata)
+                        raise
+                finally:
+                    body_temp.unlink(missing_ok=True)
                 _atomic_write(meta_path, json.dumps(metadata, sort_keys=True).encode("utf-8"))
                 return CachedResponse(text, metadata)
             time.sleep(delay)
@@ -268,12 +293,16 @@ class HttpCache:
                 if not transient_failure or attempt >= self.retries:
                     break
                 delay = _retry_delay(retry_after, attempt)
-            except (urllib.error.URLError, TimeoutError) as error:
+                if delay is None:
+                    break
+            except (urllib.error.URLError, http.client.HTTPException, OSError) as error:
                 last_error = error
                 transient_failure = True
                 if attempt >= self.retries:
                     break
                 delay = _retry_delay(None, attempt)
+                if delay is None:
+                    break
             else:
                 self.directory.mkdir(parents=True, exist_ok=True)
                 descriptor, temp_name = tempfile.mkstemp(prefix=f".{body_path.name}.", suffix=".tmp", dir=self.directory)
@@ -317,7 +346,10 @@ class HttpCache:
                     transient_failure = True
                     if attempt >= self.retries:
                         break
-                    time.sleep(_retry_delay(None, attempt))
+                    delay = _retry_delay(None, attempt)
+                    if delay is None:
+                        break
+                    time.sleep(delay)
                     continue
                 finally:
                     temp_path.unlink(missing_ok=True)
@@ -429,16 +461,20 @@ def _validate_utf8_file(path: Path) -> None:
     decoder.decode(b"", final=True)
 
 
-def _retry_delay(retry_after: str | None, attempt: int) -> float:
+def _retry_delay(retry_after: str | None, attempt: int) -> float | None:
     if retry_after:
         try:
-            return min(30.0, max(0.0, float(retry_after)))
+            delay = float(retry_after)
         except ValueError:
             try:
                 stamp = parsedate_to_datetime(retry_after)
-                return min(30.0, max(0.0, (stamp - datetime.now(timezone.utc)).total_seconds()))
+                delay = (stamp - datetime.now(timezone.utc)).total_seconds()
             except (TypeError, ValueError, OverflowError):
-                pass
+                delay = float("nan")
+        if math.isfinite(delay):
+            if delay > 30.0:
+                return None
+            return max(0.0, delay)
     return min(8.0, 0.5 * (2**attempt))
 
 

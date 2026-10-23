@@ -202,6 +202,173 @@ RHEA:10001\tA = B\tA; B\tCHEBI:1; CHEBI:2\tEC 1.1.1.1
             self.assertTrue(second.metadata["cached"])
             self.assertEqual(request.call_count, 2)
 
+    def test_http_cache_get_retries_interrupted_response_body_and_uses_stale_after_failure(self) -> None:
+        class IncompleteResponse(FakeHttpResponse):
+            def read(self, size: int = -1) -> bytes:
+                raise sources.http.client.IncompleteRead(b"partial")
+
+        for succeed in (True, False):
+            with self.subTest(succeed=succeed), tempfile.TemporaryDirectory() as directory:
+                cache = HttpCache(Path(directory), timeout=1, retries=1)
+                url = "https://example.org/data"
+                key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+                if not succeed:
+                    (Path(directory) / f"{key}.body").write_bytes(b"cached")
+                    (Path(directory) / f"{key}.json").write_text(json.dumps({
+                        "url": url,
+                        "fetched_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                    }), encoding="utf-8")
+                responses = [IncompleteResponse(b""), FakeHttpResponse(b"fresh") if succeed else IncompleteResponse(b"")]
+                with patch("enzymeinfocollector.sources.urllib.request.urlopen", side_effect=responses) as request:
+                    with patch("enzymeinfocollector.sources.time.sleep"):
+                        response = cache.get(url, ttl_seconds=0)
+                self.assertEqual(request.call_count, 2)
+                self.assertEqual(response.text, "fresh" if succeed else "cached")
+                self.assertEqual(response.metadata["stale"], not succeed)
+
+    def test_http_cache_get_drops_old_metadata_if_new_metadata_cannot_be_published(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=1)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            body_path = Path(directory) / f"{key}.body"
+            meta_path = Path(directory) / f"{key}.json"
+            body_path.write_bytes(b"old")
+            meta_path.write_text(json.dumps({
+                "url": url,
+                "fetched_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                "etag": "old-validator",
+            }), encoding="utf-8")
+            atomic_write = sources._atomic_write
+
+            def fail_metadata(path: Path, content: bytes) -> None:
+                if path == meta_path:
+                    raise OSError("disk full")
+                atomic_write(path, content)
+
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"new")):
+                with patch("enzymeinfocollector.sources._atomic_write", side_effect=fail_metadata):
+                    with self.assertRaisesRegex(OSError, "disk full"):
+                        cache.get(url, ttl_seconds=0)
+            self.assertEqual(body_path.read_bytes(), b"new")
+            self.assertFalse(meta_path.exists())
+
+    def test_http_cache_get_preserves_old_cache_pair_if_staging_new_body_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=1)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            body_path = Path(directory) / f"{key}.body"
+            meta_path = Path(directory) / f"{key}.json"
+            old_metadata = json.dumps({
+                "url": url,
+                "fetched_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                "etag": "old-validator",
+            }).encode("utf-8")
+            body_path.write_bytes(b"old")
+            meta_path.write_bytes(old_metadata)
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"new")):
+                with patch("enzymeinfocollector.sources.os.fsync", side_effect=OSError("disk full")):
+                    with self.assertRaisesRegex(OSError, "disk full"):
+                        cache.get(url, ttl_seconds=0)
+            self.assertEqual(body_path.read_bytes(), b"old")
+            self.assertEqual(meta_path.read_bytes(), old_metadata)
+            self.assertEqual(list(Path(directory).glob(f".{key}.body.*.tmp")), [])
+
+    def test_http_cache_get_restores_old_metadata_if_body_replace_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            cache = HttpCache(Path(directory), timeout=1, retries=1)
+            url = "https://example.org/data"
+            key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+            body_path = Path(directory) / f"{key}.body"
+            meta_path = Path(directory) / f"{key}.json"
+            old_metadata = json.dumps({
+                "url": url,
+                "fetched_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                "etag": "old-validator",
+            }).encode("utf-8")
+            body_path.write_bytes(b"old")
+            meta_path.write_bytes(old_metadata)
+            replace = os.replace
+
+            def fail_body_replace(source: str | os.PathLike[str], target: str | os.PathLike[str]) -> None:
+                if Path(target) == body_path:
+                    raise OSError("replace failed")
+                replace(source, target)
+
+            with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"new")):
+                with patch("enzymeinfocollector.sources.os.replace", side_effect=fail_body_replace):
+                    with self.assertRaisesRegex(OSError, "replace failed"):
+                        cache.get(url, ttl_seconds=0)
+            self.assertEqual(body_path.read_bytes(), b"old")
+            self.assertEqual(meta_path.read_bytes(), old_metadata)
+            self.assertEqual(list(Path(directory).glob(f".{key}.body.*.tmp")), [])
+
+    def test_http_cache_stops_retrying_when_retry_after_exceeds_bound(self) -> None:
+        for use_stream in (False, True):
+            for retry_after in ("60", "Wed, 21 Oct 2037 07:28:00 GMT"):
+                with self.subTest(use_stream=use_stream, retry_after=retry_after), tempfile.TemporaryDirectory() as directory:
+                    cache = HttpCache(Path(directory), timeout=1, retries=3)
+                    url = "https://example.org/data"
+                    key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+                    (Path(directory) / f"{key}.body").write_bytes(b"cached")
+                    (Path(directory) / f"{key}.json").write_text(json.dumps({
+                        "url": url,
+                        "fetched_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                    }), encoding="utf-8")
+                    error = urllib.error.HTTPError(url, 503, "busy", {"Retry-After": retry_after}, None)
+                    with patch("enzymeinfocollector.sources.urllib.request.urlopen", side_effect=error) as request:
+                        with patch("enzymeinfocollector.sources.time.sleep") as sleep:
+                            if use_stream:
+                                with cache.open_text(url, ttl_seconds=0) as (stream, metadata):
+                                    self.assertEqual(stream.read(), "cached")
+                            else:
+                                response = cache.get(url, ttl_seconds=0)
+                                self.assertEqual(response.text, "cached")
+                                metadata = response.metadata
+                    self.assertTrue(metadata["stale"])
+                    self.assertEqual(request.call_count, 1)
+                    sleep.assert_not_called()
+
+    def test_retry_after_bound_handles_dates_and_malformed_values(self) -> None:
+        self.assertIsNone(sources._retry_delay("31", 0))
+        self.assertIsNone(sources._retry_delay("Wed, 21 Oct 2037 07:28:00 GMT", 0))
+        self.assertEqual(sources._retry_delay("15", 0), 15.0)
+        self.assertEqual(sources._retry_delay("not-a-date", 1), 1.0)
+
+    def test_http_cache_discards_malformed_conditional_validators(self) -> None:
+        malformed = (
+            {"etag": []},
+            {"last_modified": {}},
+            {"etag": "invalid\r\nInjected: value"},
+            {"last_modified": "invalid\nvalue"},
+        )
+        for use_stream in (False, True):
+            for validator in malformed:
+                with self.subTest(use_stream=use_stream, validator=validator), tempfile.TemporaryDirectory() as directory:
+                    cache = HttpCache(Path(directory), timeout=1, retries=0)
+                    url = "https://example.org/data"
+                    key = hashlib.sha256(url.encode("utf-8")).hexdigest()
+                    (Path(directory) / f"{key}.body").write_bytes(b"old")
+                    (Path(directory) / f"{key}.json").write_text(json.dumps({
+                        "url": url,
+                        "fetched_at": (datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                        **validator,
+                    }), encoding="utf-8")
+                    with patch("enzymeinfocollector.sources.urllib.request.urlopen", return_value=FakeHttpResponse(b"fresh")) as request:
+                        if use_stream:
+                            with cache.open_text(url, ttl_seconds=0) as (stream, metadata):
+                                self.assertEqual(stream.read(), "fresh")
+                        else:
+                            response = cache.get(url, ttl_seconds=0)
+                            self.assertEqual(response.text, "fresh")
+                            metadata = response.metadata
+                    headers = {name.casefold() for name, _ in request.call_args.args[0].header_items()}
+                    self.assertNotIn("if-none-match", headers)
+                    self.assertNotIn("if-modified-since", headers)
+                    self.assertIsNone(metadata.get("etag"))
+                    self.assertIsNone(metadata.get("last_modified"))
+
     def test_http_cache_does_not_retry_local_cache_write_failure(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             cache = HttpCache(Path(directory), timeout=1, retries=2)
