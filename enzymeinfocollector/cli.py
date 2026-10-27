@@ -9,7 +9,6 @@ import logging
 import os
 import sys
 import tempfile
-import zipfile
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -27,10 +26,11 @@ def build_parser() -> argparse.ArgumentParser:
     inputs = parser.add_mutually_exclusive_group()
     inputs.add_argument("--enzyme", action="append", help="Enzyme name; can be repeated")
     inputs.add_argument("--ec", action="append", help="Full EC number; can be repeated")
-    inputs.add_argument("--file", type=Path, help="CSV, TSV, TXT, or XLSX input file")
+    inputs.add_argument("--file", type=Path, help="CSV, TSV, or TXT input file")
     inputs.add_argument("--replay-manifest", type=Path, help="Repeat queries and filters from a saved request manifest")
     parser.add_argument("--output", "-o", type=Path, default=Path("enzyme_results.json"), help="Output file (default: enzyme_results.json)")
     parser.add_argument("--save-manifest", type=Path, help="Atomically save the normalized queries and collection filters as JSON")
+    parser.add_argument("--prepare-manifest", action="store_true", help="Save the manifest without contacting upstream services; requires --save-manifest")
     parser.add_argument("--format", choices=("auto", "json", "csv", "fasta"), default="auto", help="Output format; auto uses the output extension")
     parser.add_argument("--stream-json", action="store_true", help="Reduce memory use for JSON output at the cost of extra disk I/O")
     parser.add_argument("--cache-dir", type=Path, default=default_cache_dir(), help="HTTP cache directory")
@@ -138,20 +138,6 @@ def _read_query_file(path: Path | None) -> list[tuple[str, str]]:
     if path is None or not path.is_file():
         raise ValueError(f"Input file does not exist: {path}")
     suffix = path.suffix.casefold()
-    if suffix == ".xlsx":
-        try:
-            from openpyxl import load_workbook
-        except ImportError as error:
-            raise ValueError("XLSX input requires openpyxl; install it with `pip install enzymeinfocollector[xlsx]`") from error
-        try:
-            workbook = load_workbook(path, read_only=True, data_only=True)
-        except (OSError, ValueError, zipfile.BadZipFile) as error:
-            raise ValueError(f"Could not read Excel workbook {path}: {error}") from error
-        try:
-            rows = workbook.active.iter_rows(values_only=True)
-            return _queries_from_rows(rows)
-        finally:
-            workbook.close()
     if suffix in {".csv", ".tsv"}:
         delimiter = "\t" if suffix == ".tsv" else ","
         with path.open("r", encoding="utf-8-sig", newline="") as stream:
@@ -160,7 +146,7 @@ def _read_query_file(path: Path | None) -> list[tuple[str, str]]:
         with path.open("r", encoding="utf-8-sig") as stream:
             values = [line.strip() for line in stream if line.strip() and not line.lstrip().startswith("#")]
             return [("ec", validate_ec_number(value)) if value.casefold().startswith("ec ") or (value[:1].isdigit() and value.count(".") >= 2) else ("enzyme", value) for value in values]
-    raise ValueError("Input file must have .csv, .tsv, .txt, or .xlsx extension")
+    raise ValueError("Input file must have .csv, .tsv, or .txt extension")
 
 
 def _queries_from_rows(rows: Iterable[tuple[Any, ...] | list[Any]]) -> list[tuple[str, str]]:
@@ -516,7 +502,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO if args.verbose else logging.WARNING, format="%(levelname)s: %(message)s")
     if args.command == "cache":
-        if args.enzyme or args.ec or args.file or args.replay_manifest or args.save_manifest or args.stream_json:
+        if args.enzyme or args.ec or args.file or args.replay_manifest or args.save_manifest or args.prepare_manifest or args.stream_json:
             parser.error("cache maintenance cannot be combined with collection inputs")
         try:
             cache = HttpCache(args.cache_dir)
@@ -550,6 +536,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
     if not (args.enzyme or args.ec or args.file or args.replay_manifest):
         parser.error("one of --enzyme, --ec, --file, or --replay-manifest is required")
+    if args.prepare_manifest and not args.save_manifest:
+        parser.error("--prepare-manifest requires --save-manifest")
     if args.timeout <= 0 or args.retries < 0:
         parser.error("--timeout must be positive and --retries must be non-negative")
     selected_format = _select_format(args.output, args.format)
@@ -591,6 +579,9 @@ def main(argv: list[str] | None = None) -> int:
                 "reviewed_only": reviewed_only,
                 "taxon_ids": taxon_ids,
             })
+            if args.prepare_manifest:
+                print(f"Prepared {len(queries)} query(s) in {args.save_manifest}", file=sys.stderr)
+                return 0
         cache = HttpCache(args.cache_dir, contact_email=args.contact_email, timeout=args.timeout, retries=args.retries)
         collector = EnzymeCollector(
             cache,

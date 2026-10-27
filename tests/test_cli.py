@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import csv
-import importlib.util
 import json
 import tempfile
 import unittest
@@ -167,19 +166,19 @@ class CliTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "needs a Protein/Enzyme or EC/EC number column"):
             _queries_from_rows(rows())
 
-    @unittest.skipUnless(importlib.util.find_spec("openpyxl"), "openpyxl is an optional XLSX extra")
-    def test_reads_xlsx_input(self) -> None:
-        from openpyxl import Workbook
-
+    def test_prepare_manifest_without_network_or_result_file(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
-            path = Path(directory) / "enzymes.xlsx"
-            workbook = Workbook()
-            sheet = workbook.active
-            sheet.append(["Protein", "EC number"])
-            sheet.append(["Alcohol dehydrogenase", "1.1.1.1"])
-            workbook.save(path)
-            workbook.close()
-            self.assertEqual(_read_query_file(path), [("enzyme", "Alcohol dehydrogenase"), ("ec", "1.1.1.1")])
+            root = Path(directory)
+            source = root / "queries.csv"
+            source.write_text("EC number\n1.1.1.1\n1.1.1.1\n", encoding="utf-8")
+            manifest = root / "run.json"
+            output = root / "unused.json"
+            with patch("enzymeinfocollector.cli.HttpCache", side_effect=AssertionError("network cache initialized")):
+                self.assertEqual(main(["--file", str(source), "--reviewed-only", "--save-manifest", str(manifest), "--prepare-manifest", "-o", str(output)]), 0)
+            self.assertFalse(output.exists())
+            self.assertEqual(json.loads(manifest.read_text(encoding="utf-8"))["queries"], [{"type": "ec", "value": "1.1.1.1"}])
+            with self.assertRaises(ValueError):
+                _read_query_file(root / "queries.xlsx")
 
     def test_request_manifest_replays_queries_and_collection_filters(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
