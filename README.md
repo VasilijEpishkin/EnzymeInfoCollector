@@ -1,141 +1,147 @@
 # EnzymeInfoCollector
 
-EnzymeInfoCollector gathers a reproducible enzyme record from three authoritative resources: ExPASy ENZYME for nomenclature and EC entries, UniProtKB for protein annotations and sequences, and Rhea for curated reactions. It writes local JSON, CSV, or FASTA files and records where each source response came from.
+EnzymeInfoCollector собирает воспроизводимую запись об энзиме из трёх авторитетных ресурсов: ExPASy ENZYME — номенклатура и записи EC, UniProtKB — аннотации белков и последовательности, Rhea — курируемые реакции. Программа сохраняет локальные файлы JSON, CSV или FASTA и фиксирует происхождение данных из каждого источника.
 
-The project is a client-side data collector, not a replacement for BRENDA, ExplorEnz, Open Enzyme Database, or CLEAN DB. It uses their complementary identifiers to assemble a small, traceable dataset for research workflows.
+Это клиентский сборщик данных, а не замена BRENDA, ExplorEnz, Open Enzyme Database или CLEAN DB. Он объединяет взаимодополняющие идентификаторы этих ресурсов для подготовки небольших прослеживаемых наборов данных в исследовательских процессах.
 
-## Requirements
+## Требования
 
-- Python 3.11 or newer
-- Network access to ExPASy, UniProt, and Rhea for a fresh collection
-- `openpyxl` only when reading Excel workbooks
+- Python 3.11 или новее
+- Доступ к ExPASy, UniProt и Rhea для получения актуальных данных
+- openpyxl — только для чтения таблиц Excel
 
-## Install
+## Установка
 
-```bash
+~~~bash
 python -m venv .venv
 source .venv/bin/activate
 python -m pip install .
-```
+~~~
 
-For XLSX input, install the optional spreadsheet dependency:
+Для поддержки XLSX установите дополнительную зависимость:
 
-```bash
-python -m pip install '.[xlsx]'
-```
+~~~bash
+python -m pip install ".[xlsx]"
+~~~
 
-## Use
+## Использование
 
-Collect by enzyme name (an exact name match is preferred; otherwise the name is matched against official and alternative ENZYME names):
+Сбор по названию энзима. Сначала ищется точное совпадение; иначе запрос сопоставляется с официальными и альтернативными названиями ENZYME:
 
-```bash
+~~~bash
 enzymeinfocollector --enzyme "Alcohol dehydrogenase" --output alcohol-dehydrogenase.json
-```
+~~~
 
-Collect by one or more EC numbers:
+Сбор по одному или нескольким номерам EC:
 
-```bash
+~~~bash
 enzymeinfocollector --ec 1.1.1.1 --ec 3.5.1.n3 -o enzymes.json
-```
+~~~
 
-Reduce the UniProt result set or response size with server-side filters. The defaults still include all matching entries and sequences.
+Чтобы уменьшить набор результатов UniProt или размер ответа, используйте серверные фильтры. По умолчанию включаются все совпадающие записи и последовательности:
 
-```bash
+~~~bash
 enzymeinfocollector --ec 1.1.1.1 --reviewed-only --taxon-id 4932 --no-sequences -o annotations.json
-```
+~~~
 
-Taxon filters include descendant taxa. `--no-sequences` still returns protein names, accessions, organism IDs, EC annotations, and sequence lengths.
+Фильтр таксона включает дочерние таксоны. Параметр --no-sequences исключает аминокислотные последовательности, но сохраняет названия белков, номера доступа, идентификаторы организмов, аннотации EC и длины последовательностей.
 
-Read a CSV or TSV with a `Protein`, `Enzyme`, or `EC number` column. For spreadsheet input, XLSX is also supported when the optional dependency is installed; the first worksheet is used.
+Можно читать CSV или TSV со столбцом Protein, Enzyme или EC number. Также поддерживается XLSX, если установлена дополнительная зависимость; используется первый лист книги.
 
-```bash
+~~~bash
 enzymeinfocollector --file enzyme_list.xlsx -o enzymes.json
 enzymeinfocollector --file enzyme_list.csv -o enzymes.csv
-```
+~~~
 
-Save a reusable request manifest with the normalized query list and collection filters, then replay it later without the original input file:
+Сохраните повторно используемый манифест запроса с нормализованным списком запросов и фильтрами сбора, а затем запустите его снова без исходного файла:
 
-```bash
+~~~bash
 enzymeinfocollector --file enzyme_list.csv --reviewed-only --taxon-id 4932 \
   --save-manifest run.json -o enzymes.fasta
 enzymeinfocollector --replay-manifest run.json -o refreshed-enzymes.fasta
-```
+~~~
 
-Manifest files contain query values in plain text and should be stored accordingly. They preserve the request and collection filters, not upstream database snapshots; later replays can return different results as ExPASy, UniProt, and Rhea change. Output format, cache, timeout, retry, contact email, and refresh behavior remain controls for each invocation. Replay rejects conflicting collection filters.
+Манифесты содержат значения запросов в открытом виде — храните их с учётом этого. В них сохраняются запрос и фильтры сбора, но не снимки исходных баз; при повторном запуске результаты могут измениться вслед за ExPASy, UniProt и Rhea. Формат результата, кэш, тайм-аут, число повторов, контактный адрес и обновление задаются при каждом запуске. Повторный запуск отклоняет конфликтующие фильтры сбора.
 
-Export collected protein sequences as FASTA for downstream sequence analysis:
+Экспорт белковых последовательностей в FASTA для дальнейшего анализа:
 
-```bash
+~~~bash
 enzymeinfocollector --ec 1.1.1.1 -o alcohol-dehydrogenase.fasta
-```
+~~~
 
-FASTA records include UniProt accessions, EC annotations, organism names, and source labels. Duplicate accessions are written once. JSON output retains the full reaction and provenance records; FASTA is intended as a sequence-analysis export.
+Записи FASTA содержат номера доступа UniProt, аннотации EC, названия организмов и метки источников. Дублирующиеся номера доступа выводятся один раз. JSON сохраняет полные сведения о реакциях и происхождении данных; FASTA предназначен для анализа последовательностей.
 
-A plain text file may contain one enzyme name or full EC number per line. Prefix an EC number with `EC ` if you want to make its type explicit.
+Текстовый файл может содержать по одному названию энзима или полному номеру EC в строке. Чтобы явно указать тип значения, добавьте перед номером префикс EC.
 
-Add a contact email to the User-Agent as recommended by Rhea, and tune the request timeout or retry count when needed:
+Укажите контактный адрес в User-Agent, как рекомендует Rhea, и при необходимости настройте тайм-аут и число повторов:
 
-```bash
+~~~bash
 enzymeinfocollector --ec 1.1.1.1 --contact-email researcher@example.org --timeout 60 --retries 4 --verbose
-```
+~~~
 
-`ENZYMEINFOCOLLECTOR_EMAIL` can provide the contact email instead. `--refresh` requests fresh responses instead of using unexpired cache entries. HTTP responses are cached under `~/.cache/enzymeinfocollector` (or `$XDG_CACHE_HOME/enzymeinfocollector`); source data and API results have a one to seven day cache lifetime. If a transient upstream failure occurs, a cached response up to 30 days old may be used and is marked `stale` in provenance. The program does not silently replace missing data with empty values when an upstream request fails.
+Контактный адрес можно также задать переменной окружения ENZYMEINFOCOLLECTOR_EMAIL. Параметр --refresh запрашивает свежие ответы вместо использования действующих записей кэша. HTTP-ответы хранятся в ~/.cache/enzymeinfocollector (или $XDG_CACHE_HOME/enzymeinfocollector); срок кэширования данных источников и API составляет от одного до семи дней. При временном сбое может использоваться ответ из кэша возрастом до 30 дней; в сведениях о происхождении он помечается как stale. При сбое источника программа не подменяет отсутствующие данные пустыми значениями.
 
-Concurrent processes coordinate cache reads and refreshes per URL, so they cannot mix a response body with another request's metadata. Small `.lock` sidecar files are retained in the cache directory.
+Параллельные процессы координируют чтение и обновление кэша для каждого URL, чтобы не смешивать тело ответа с метаданными другого запроса. В каталоге кэша остаются небольшие файлы блокировки с расширением .lock.
 
-For the Python API, use a separate `EnzymeCollector` instance for each concurrent collection. An instance is not thread-safe; the shared HTTP cache itself coordinates concurrent access across processes. Source snapshots are loaded per `collect()` call, and the HTTP cache applies its TTL between calls; with `refresh=True`, each call requests an upstream refresh (a recent cached response may still be used after a transient failure).
+Для Python API используйте отдельный экземпляр EnzymeCollector для каждого параллельного сбора. Экземпляр не потокобезопасен; общий HTTP-кэш координирует доступ между процессами. Снимки источников загружаются при каждом вызове collect(), а срок хранения HTTP-кэша применяется между вызовами. При refresh=True каждый вызов запрашивает обновление у источника, но при временном сбое всё ещё может использоваться недавний ответ из кэша.
 
-Inspect cache size without displaying query URLs, or preview removal of entries older than the 30-day stale-response window:
+Проверьте размер кэша, не показывая URL запросов, или предварительно просмотрите удаление записей старше 30-дневного окна использования устаревших ответов:
 
-```bash
+~~~bash
 enzymeinfocollector cache info
 enzymeinfocollector cache prune
 enzymeinfocollector cache prune --older-than-days 60 --apply
-```
+~~~
 
-`cache info` also reports the number and logical size of `.lock` sidecars. Pruning is a dry run unless `--apply` is supplied; dry runs can create missing `.lock` sidecars so the cache can be inspected consistently while another process is collecting. Pruning locks and rechecks each eligible entry before deleting its body and metadata. Incomplete or invalid entries are reported by `cache info` and left untouched; `.lock` files and temporary files are never removed. Retention cannot be shorter than 30 days, preserving the existing offline fallback window.
+Команда cache info сообщает также количество и логический размер файлов .lock. Команда cache prune по умолчанию только показывает план удаления; флаг --apply включает удаление. Предварительный просмотр может создавать отсутствующие .lock для согласованной проверки, пока другой процесс собирает данные. Перед удалением тела и метаданных каждой подходящей записи программа блокирует её и повторно проверяет. Неполные или некорректные записи отображаются командой cache info и остаются нетронутыми. Файлы .lock и временные файлы не удаляются. Минимальный срок хранения — 30 дней, чтобы сохранялось окно резервного использования устаревших ответов.
 
-## Output
+## Результаты
 
-JSON is the default. When an EC entry has been transferred, the original entry remains in `enzymes` and gains a `resolution` object. The collector follows chained and one-to-many ENZYME transfers, fetches each unique active terminal EC once, and records up to 10,000 complete paths per requested EC. If more paths remain, `resolution.path_limit_reached` is `true`, a `truncated` marker appears in `resolution.paths`, and the result is marked partial even if no active terminal was found among the examined paths. `resolution.status` is `resolved`, `partial`, or `unresolved`; missing entries, deleted entries, cycles, and transfers without a target are listed explicitly. Active terminal records appear under `resolution.resolved_enzymes` with the original requested EC and their resolution paths. Existing active and deleted entry records retain their current shape.
+По умолчанию используется JSON. Если запись EC перенесена, исходная запись остаётся в массиве enzymes и дополняется объектом resolution. Сборщик проходит по цепочкам и ветвлениям переносов ENZYME, запрашивает каждую уникальную активную конечную запись EC один раз и сохраняет до 10 000 полных путей для каждого запрошенного EC. Если путей больше, resolution.path_limit_reached получает значение true, в resolution.paths появляется маркер truncated, а результат помечается как частичный, даже если среди проверенных путей не найдено активной конечной записи. resolution.status принимает значения resolved, partial или unresolved. Отсутствующие и удалённые записи, циклы и переносы без целевого EC указываются явно. Активные конечные записи находятся в resolution.resolved_enzymes; для каждой указаны исходный EC и пути разрешения. Структура существующих активных и удалённых записей не меняется.
 
-For large JSON exports, opt into lower-memory disk streaming:
+Для больших JSON-экспортов можно включить потоковую запись на диск, чтобы снизить потребление памяти:
 
-```bash
+~~~bash
 enzymeinfocollector --ec 1.1.1.1 --stream-json --output results.json
-```
+~~~
 
-CSV output uses one row per UniProt protein for each matched EC entry. Its existing columns and their order are preserved; transfer metadata columns are appended. Transfer sources are preserved as `record_kind=enzyme` rows, and their active targets are included as `record_kind=resolved_target` rows with `requested_ec`, `resolution_status`, and JSON-encoded `resolution_paths`; unresolved paths remain on the source row. Its `ec_reactions` column contains the EC-level Rhea reaction list as JSON, and `association_basis` marks that link as EC-level; it does not claim that each protein has an individually curated link to every reaction. List-valued columns are JSON-encoded. FASTA includes proteins collected for resolved active targets. Each result includes:
+CSV содержит одну строку на белок UniProt для каждой найденной записи EC. Имена и порядок существующих столбцов сохраняются, а столбцы метаданных переносов добавляются в конец. Исходные записи переносов сохраняются как строки record_kind=enzyme; активные целевые записи — как record_kind=resolved_target с полями requested_ec, resolution_status и resolution_paths в формате JSON. Неразрешённые пути остаются в исходной строке. Столбец ec_reactions содержит список реакций Rhea на уровне EC в формате JSON, а association_basis указывает, что связь задана на уровне EC. Это не означает, что для каждого белка отдельно курировалась связь с каждой реакцией. Списки в столбцах кодируются в JSON. FASTA включает белки для разрешённых активных целевых записей. Каждый результат содержит:
 
-- ENZYME EC number, accepted and alternative names, catalytic activity, comments, and UniProt cross-references
-- UniProt accessions, protein/gene names, organism, reviewed status, sequence length, and amino acid sequence when requested
-- Rhea reaction ID, equation, ChEBI participant names and IDs, and reaction SMILES when Rhea provides a matching directed reaction record. Undirected master IDs include available left-to-right/right-to-left SMILES in `reaction_smiles_directions`.
-- Per-source request URL, retrieval time, cache status, and stale-cache warning where applicable
+- Номер EC из ENZYME, принятые и альтернативные названия, каталитическую активность, комментарии и перекрёстные ссылки на UniProt.
+- Номера доступа UniProt, названия белка и гена, организм, статус проверки записи, длину и, если запрошена, аминокислотную последовательность.
+- Идентификатор реакции Rhea, уравнение, названия и идентификаторы участников ChEBI и SMILES реакции, если Rhea предоставляет подходящую запись направленной реакции. Для ненаправленных основных идентификаторов доступные SMILES слева направо и справа налево помещаются в reaction_smiles_directions.
+- URL запроса к каждому источнику, время получения, статус кэша и предупреждение об использовании устаревшего кэша, если применимо.
 
-CSV and FASTA CLI exports process proteins in bounded batches and use temporary disk runs to preserve accession order within each EC result. Repeated active ECs within one batch reuse their sorted runs and Rhea metadata; runs are removed after their final use. Runs use the system temporary directory and can require more disk space than the cached UniProt response. If a batch repeats many ECs before their final uses, their runs can coexist and raise peak disk use. JSON is eager by default. Add `--stream-json` to spool protein records to temporary disk and insert them into the completed JSON document, preserving transfer resolution and source provenance while reducing memory use. This creates a formatted protein spool beside the output; the spool and replacement JSON coexist while the final file is written, so allow temporary disk space for both. A local five-run synthetic benchmark with 16 ECs and 36,000 emitted proteins measured median streamed JSON at 1.68 seconds and 30.2 MiB sampled peak RSS, versus 1.18 seconds and 64.1 MiB for eager JSON; both produced identical 22.1 MB output. This fixture is illustrative, not a product guarantee, and `--stream-json` trades runtime for lower memory use. All CLI formats replace the destination atomically after collection succeeds. The Python `collect()` API retains its full in-memory result; in callback mode, it sends proteins to the callback and returns metadata-only enzyme records. Callback arguments are borrowed, read-only views valid only during the callback. Query results and enzyme records may be reused, and transfer resolution is updated as target records arrive. Copy values the callback needs to retain or modify.
+При экспорте CSV и FASTA через CLI белки обрабатываются ограниченными по размеру пакетами. Для сохранения порядка номеров доступа внутри результата EC используются временные файлы на диске. Повторяющиеся активные EC в одном пакете повторно используют отсортированные файлы и метаданные Rhea; после последнего использования файлы удаляются. Они находятся во временном каталоге системы и могут занять больше места, чем кэшированный ответ UniProt. Если много EC повторяются до своего последнего использования, их файлы могут сосуществовать и увеличить пиковое потребление диска.
 
-An earlier three-run cached measurement on 2026-10-23 (CPython 3.12.3, WSL2, EC 1.1.1.1, 40,358 UniProt proteins with sequences) measured eager JSON at a median peak RSS of 196.5 MiB and 2.36 seconds, versus CSV at 109.6 MiB and 8.38 seconds. Output sizes were 35.3 MiB for JSON and 188.1 MiB for CSV. These describe that source snapshot and machine, not a resource guarantee; use `--stream-json` when reducing JSON memory matters more than runtime.
+По умолчанию JSON формируется целиком в памяти. Параметр --stream-json временно сохраняет записи белков на диск и вставляет их в готовый JSON-документ, снижая расход памяти при сохранении разрешения переносов и происхождения данных. Рядом с результатом создаётся файл-посредник с форматированными записями белков. Пока записывается итоговый файл, посредник и заменяемый JSON существуют одновременно; предусмотрите место для обоих.
 
-One local five-run synthetic benchmark on Linux/CPython 3.12.3 with 16 ECs and 36,000 emitted proteins measured median streamed JSON at 1.61 seconds and 30.1 MiB sampled peak RSS, versus 1.15 seconds and 64.1 MiB for eager JSON; both produced identical 22.1 MB output. The fixture is illustrative, not a product guarantee. Reproduce it with `python benchmarks/stream_json.py` on Linux. The script creates temporary local fixtures, checks eager/streamed JSON and callback parity, then reports medians from five fresh-process runs; it does not contact external services. RSS sampling uses `/proc`. Callback mode only collects and hashes protein accessions; it does not serialize or write output, so its timing is not directly comparable to the CLI export modes.
+В локальном синтетическом тесте из пяти запусков с 16 EC и 36 000 выводимых белков медианное время потоковой записи JSON составило 1,68 с, а измеренный пик RSS — 30,2 МиБ; обычной записи JSON — 1,18 с и 64,1 МиБ. В обоих случаях размер результата был одинаковым — 22,1 МБ. Этот пример не гарантирует характеристики программы: режим --stream-json снижает расход памяти ценой времени. Все CLI-форматы атомарно заменяют целевой файл только после успешного сбора.
 
-Reaction SMILES and the direction mapping are read from Rhea's published TSV files. They are not reconstructed by assuming participant order from the human-readable equation. An undirected reaction has a null `reaction_smiles` value and a `reaction_smiles_directions` object when directed forms are available. A reaction with no matching SMILES record has a null value and an empty directions object.
+Python API collect() хранит полный результат в памяти. В режиме callback он передаёт белки функции обратного вызова и возвращает записи энзимов только с метаданными. Аргументы callback — заимствованные представления только для чтения, действительные лишь во время вызова. Результаты запросов и записи энзимов могут использоваться повторно, а разрешение переносов обновляется по мере поступления целевых записей. Копируйте значения, которые нужно сохранить или изменить.
 
-Output replacement is atomic: a failed collection does not overwrite an existing result file with a partial dataset. An enzyme-name query with no ExPASy match is included with result status `not_found`. For an explicit valid EC missing from ExPASy, the requested number is retained with enzyme status `not_found_in_expasy`; UniProt and Rhea are still queried independently, so protein or reaction data can be present. The CLI summary reports inputs without an ExPASy match separately from collection failures. Rhea responses at its 10,000-row cap are rejected as potentially incomplete rather than written silently.
+В более раннем измерении на кэшированных данных — три запуска от 2026-10-23, CPython 3.12.3, WSL2, EC 1.1.1.1 и 40 358 белков UniProt с последовательностями — медианный пиковый RSS составил 196,5 МиБ для JSON и 109,6 МиБ для CSV; время выполнения — 2,36 и 8,38 с соответственно. Размер файлов: 35,3 МиБ для JSON и 188,1 МиБ для CSV. Эти показатели относятся к конкретному снимку данных и машине, а не являются гарантией характеристик. Используйте --stream-json, если снижение расхода памяти важнее времени выполнения.
 
-## Sources and data use
+Другой локальный синтетический тест из пяти запусков на Linux с CPython 3.12.3, 16 EC и 36 000 выводимых белков показал медианное время потокового JSON 1,61 с и измеренный пик RSS 30,1 МиБ; обычного JSON — 1,15 с и 64,1 МиБ. Оба результата имели размер 22,1 МБ. Тест является иллюстрацией, не гарантией. Запустите его в Linux командой python benchmarks/stream_json.py. Скрипт создаёт временные локальные фикстуры, проверяет совпадение обычного и потокового JSON и режима callback, затем рассчитывает медианы для пяти новых процессов; внешние сервисы не вызываются. RSS измеряется через /proc. В режиме callback скрипт только собирает и хеширует номера доступа белков, не сериализуя данные и не записывая файл, поэтому время этого режима нельзя напрямую сравнивать с экспортом CLI.
 
-- [ExPASy ENZYME](https://enzyme.expasy.org/) publishes the official nomenclature file used for name and EC lookup.
-- [UniProt REST API](https://rest.uniprot.org/) supplies protein records and sequences.
-- [Rhea REST API](https://www.rhea-db.org/help/rest-api) supplies curated reactions; [Rhea TSV downloads](https://www.rhea-db.org/help/download) supply the directed reaction SMILES file.
+SMILES реакций и соответствия направлений считываются из опубликованных TSV-файлов Rhea. Они не восстанавливаются на основании предполагаемого порядка участников в текстовом уравнении. Для ненаправленной реакции reaction_smiles равен null; если направленные формы доступны, они указаны в reaction_smiles_directions. Если подходящей записи SMILES нет, reaction_smiles равен null, а объект направлений пуст.
 
-Collected records remain subject to each upstream provider's terms, license, attribution, and citation requirements. Check those requirements before redistributing a collected dataset. Rhea describes its reaction-SMILES TSV as experimental/beta data; keep that status in mind when using the strings in downstream chemistry workflows.
+Результат заменяется атомарно: сбой сбора не перезаписывает существующий файл неполным набором данных. Если ExPASy не находит энзим по названию, запрос включается со статусом not_found. Если в ExPASy нет указанного корректного номера EC, программа сохраняет его со статусом энзима not_found_in_expasy, но независимо запрашивает UniProt и Rhea; сведения о белках или реакциях всё ещё могут присутствовать. Сводка CLI перечисляет запросы без совпадения в ExPASy отдельно от ошибок сбора. Ответы Rhea, достигшие лимита 10 000 строк, отклоняются как потенциально неполные, а не сохраняются без предупреждения.
 
-## Development and checks
+## Источники и использование данных
 
-Run the offline parser, cache, pipeline, and export tests with:
+- [ExPASy ENZYME](https://enzyme.expasy.org/) публикует официальный файл номенклатуры для поиска названий и EC.
+- [UniProt REST API](https://rest.uniprot.org/) предоставляет записи белков и последовательности.
+- [Rhea REST API](https://www.rhea-db.org/help/rest-api) предоставляет курируемые реакции; [загрузки TSV Rhea](https://www.rhea-db.org/help/download) содержат таблицу направленных SMILES реакций.
 
-```bash
+Для собранных записей продолжают действовать условия, лицензии и требования к атрибуции и цитированию поставщиков данных. Перед распространением набора проверьте эти требования. Rhea описывает TSV-файл SMILES реакций как экспериментальные данные в бета-версии; учитывайте это при использовании строк в последующих задачах по химии.
+
+## Разработка и проверки
+
+Запустите офлайн-тесты парсера, кэша, конвейера и экспорта:
+
+~~~bash
 python -m unittest discover -s tests -v
-```
+~~~
 
-GitHub Actions runs the test suite on Python 3.11–3.15 on Linux and checks Python 3.11 and 3.15 on Windows. The software is licensed under MIT; the separate license text is in [LICENSE](LICENSE).
+Программа распространяется по лицензии MIT; полный текст находится в файле [LICENSE](LICENSE).
