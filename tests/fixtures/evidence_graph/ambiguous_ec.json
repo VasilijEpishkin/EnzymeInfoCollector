@@ -1,0 +1,38 @@
+{
+  "synthetic": true,
+  "description": "Synthetic EC ambiguity fixture. Identifiers are illustrative, not biological assertions.",
+  "source_release": {
+    "database": "UniProtKB",
+    "release": "synthetic-test-release",
+    "retrieved_at": "2026-10-01T00:00:00Z"
+  },
+  "proteins": ["P00001", "P00002"],
+  "reactions": [
+    {"master_id": "RHEA:10000", "rhea_id": "RHEA:10001", "direction": "left_to_right"},
+    {"master_id": "RHEA:10004", "rhea_id": "RHEA:10005", "direction": "left_to_right"}
+  ],
+  "protein_ec": [
+    {"accession": "P00001", "ec_number": "1.1.1.1"},
+    {"accession": "P00002", "ec_number": "1.1.1.1"}
+  ],
+  "reaction_ec": [
+    {"master_id": "RHEA:10000", "ec_number": "1.1.1.1"},
+    {"master_id": "RHEA:10004", "ec_number": "1.1.1.1"}
+  ],
+  "protein_reactions": [
+    {
+      "accession": "P00001",
+      "rhea_id": "RHEA:10001",
+      "master_id": "RHEA:10000",
+      "direction": "left_to_right",
+      "evidence": [
+        {
+          "source_database": "UniProtKB",
+          "eco_code": "ECO:0000269",
+          "assertion_method": "manual",
+          "citation_ids": []
+        }
+      ]
+    }
+  ]
+}
