@@ -54,7 +54,8 @@ def _iri(row: dict[str, Any], key: str, pattern: re.Pattern[str]) -> str:
     value = row.get(key)
     if not isinstance(value, dict) or value.get("type") != "uri":
         raise DataSourceError(f"UniProt SPARQL binding {key} is missing or is not a URI")
-    match = pattern.fullmatch(value.get("value", ""))
+    iri = value.get("value")
+    match = pattern.fullmatch(iri) if isinstance(iri, str) else None
     if not match:
         raise DataSourceError(f"Unexpected UniProt SPARQL {key} URI: {value.get('value')!r}")
     return match.group(1)
@@ -90,7 +91,9 @@ def fetch_direct_rhea_links(
     limit: int = SPARQL_RESULT_LIMIT,
 ) -> tuple[list[DirectRheaLink], dict[str, Any]]:
     """Return directly annotated pairs; reject a saturated LIMIT as incomplete."""
-    query = build_direct_rhea_query(accessions, limit=limit)
+    requested = tuple(accessions)
+    query = build_direct_rhea_query(requested, limit=limit)
+    allowed = set(requested)
     url = UNIPROT_SPARQL_URL + "?" + urllib.parse.urlencode(
         {"query": query, "format": "json"}
     )
@@ -101,12 +104,17 @@ def fetch_direct_rhea_links(
     links: set[DirectRheaLink] = set()
     for row in rows:
         accession = _iri(row, "protein", _UNIPROT_IRI)
+        if accession not in allowed:
+            raise DataSourceError(f"Unexpected UniProt accession in SPARQL result: {accession}")
         rhea_id = _iri(row, "rhea", _RHEA_IRI)
         annotation = row.get("annotation")
         if not isinstance(annotation, dict) or annotation.get("type") != "uri":
             raise DataSourceError("UniProt catalytic annotation URI is missing")
         iri = annotation.get("value", "")
-        if not isinstance(iri, str) or not iri.startswith("http"):
+        if not isinstance(iri, str) or not (
+            iri.startswith(f"http://purl.uniprot.org/uniprot/{accession}#")
+            or iri.startswith(f"https://purl.uniprot.org/uniprot/{accession}#")
+        ):
             raise DataSourceError("Invalid UniProt catalytic annotation URI")
         links.add(DirectRheaLink(accession, f"RHEA:{rhea_id}", iri))
     return sorted(links, key=lambda item: (item.accession, item.rhea_id, item.annotation_iri)), response.metadata
@@ -142,7 +150,8 @@ def assertions_from_direct_links(
                     evidence=(
                         Evidence(
                             source_database="UniProtKB",
-                            source_statement_iri=annotation_iri,
+                            # The annotation resource is NOT the reified statement URI.
+                            source_statement_iri=None,
                         ),
                     ),
                 )

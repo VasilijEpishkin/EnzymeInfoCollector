@@ -70,8 +70,9 @@ the existing HTTP cache and preserves the legacy CLI.
    that a JSON comment index is a persistent RDF statement URI.
 2. Broaden to more organisms and TrEMBL; the Swiss-Prot mapping alone is
    insufficient to characterize unreviewed entries.
-3. Document and verify current UniProt/Rhea licensing and redistribution
-   terms before bundling bulk snapshots or exposing a hosted service.
+3. Source licenses are verified as CC BY 4.0 (see
+   `docs/architecture/data_licenses.md`); include attribution in exports
+   and recheck any third-party datasets before redistribution.
 4. Test more missing/ambiguous ECO/citation cases and release changes.
 
 The present 5-entry sample establishes **technical feasibility**, not
