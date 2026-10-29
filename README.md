@@ -85,6 +85,19 @@ for protein in dataset.proteins:
 Rhea. При устаревших или противоречивых ответах выдаёт ошибку. Отсутствие
 аннотации означает «неизвестно», а не «белок не катализирует реакцию».
 
+Для воспроизводимого JSON-экспорта и отдельной проверки на официальном
+сопоставлении Rhea Swiss-Prot предусмотрены экспериментальные команды:
+
+~~~bash
+python -m enzymeinfocollector.evidence_cli collect --accession P00330 -o evidence.json
+python -m enzymeinfocollector.evidence_cli validate --accession P00330 --accession P00331 --refresh
+~~~
+
+`validate` сравнивает **основные и направленные идентификаторы Rhea**,
+но не доказывает экспериментальную полноту аннотаций. Для TrEMBL эта
+проверка не используется: таблица `rhea2uniprot_sprot.tsv` охватывает
+только Swiss-Prot. Экспорт и проверки не меняют прежний CLI.
+
 [Описание API, ограничений и проверки на пяти белках](docs/architecture/direct_evidence.md).
 Базовые научные контракты: [evidence model](docs/architecture/evidence_model.md).
 
