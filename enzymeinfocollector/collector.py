@@ -10,6 +10,7 @@ from typing import Any, Callable
 
 from .sources import (
     ENZYME_URL,
+    DataSourceError,
     HttpCache,
     fetch_reaction_smiles,
     fetch_reaction_directions,
@@ -56,6 +57,8 @@ class EnzymeCollector:
             return
         response = self.cache.get(ENZYME_URL, ttl_seconds=7 * 24 * 60 * 60, refresh=self.refresh)
         self._enzyme_entries = parse_enzyme_dat(response.text)
+        if not self._enzyme_entries:
+            raise DataSourceError("ExPASy ENZYME catalog is empty or has an unexpected format")
         self._enzyme_index = {item["ec_number"].casefold(): item for item in self._enzyme_entries}
         self._enzyme_source = response.metadata
 
