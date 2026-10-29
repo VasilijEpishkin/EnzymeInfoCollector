@@ -65,7 +65,7 @@ enzymeinfocollector cache prune --older-than-days 60 --apply
 
 ## Экспериментальный Python API: прямые связи UniProt ↔ Rhea
 
-Новый модуль \`enzymeinfocollector.evidence_sources\` извлекает **индивидуальные**
+Новый модуль `enzymeinfocollector.evidence_sources` извлекает **индивидуальные**
 каталитические аннотации UniProtKB с Rhea ID, ECO-кодами и доступными ссылками
 на публикации. Отдельно сохраняются Rhea master ID и направленные
 физиологические реакции. Связи **не создаются** из совпадения EC-номеров.
