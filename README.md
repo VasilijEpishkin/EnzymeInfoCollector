@@ -71,7 +71,6 @@ enzymeinfocollector cache prune --older-than-days 60 --apply
 физиологические реакции. Связи **не создаются** из совпадения EC-номеров.
 
 ~~~python
-from dataclasses import asdict
 from enzymeinfocollector.evidence_sources import DirectEvidenceCollector
 from enzymeinfocollector.sources import HttpCache, default_cache_dir
 

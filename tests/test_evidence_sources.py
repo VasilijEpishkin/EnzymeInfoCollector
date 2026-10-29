@@ -189,6 +189,7 @@ class EvidenceSourcesTests(unittest.TestCase):
         self.assertEqual(cache.calls[0][0], UNIPROT_RELEASE_URL)
         self.assertEqual(cache.calls[1][0], RHEA_DIRECTIONS_URL)
         self.assertEqual(cache.calls[2][0], UNIPROT_ENTRY_URL.format(accession="P00330"))
+        self.assertEqual(len(dataset.proteins[0].source_release.sha256 or ""), 64)
         self.assertEqual(dataset.rhea_directions_snapshot.database, "Rhea")
         self.assertEqual(len(dataset.rhea_directions_snapshot.sha256 or ""), 64)
 

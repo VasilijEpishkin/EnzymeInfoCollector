@@ -377,6 +377,7 @@ class DirectEvidenceCollector:
                 database="UniProtKB",
                 release=release,
                 retrieved_at=fetched_at,
+                sha256=hashlib.sha256(response.text.encode("utf-8")).hexdigest(),
                 source_url=url,
             )
             proteins.append(parse_uniprot_catalytic_activities(entry, source_release, directions))
