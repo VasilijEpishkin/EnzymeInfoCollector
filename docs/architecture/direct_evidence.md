@@ -93,3 +93,28 @@ Live manual validation: fetch the five UniProt accession JSON documents,
 numeric Rhea IDs **after normalizing the "RHEA:" prefix**. The mapping TSV
 includes both master and directional IDs; comparing only master IDs to the
 entire mapping is invalid.
+
+## Standalone export and independent validation (PR2 stabilization)
+
+The canonical API remains `DirectEvidenceCollector` from
+`evidence_sources.py`; it is **not** duplicated by a second UniProt/Rhea
+adapter. The companion module `evidence_cli.py` provides opt-in commands:
+
+~~~bash
+python -m enzymeinfocollector.evidence_cli collect --accession P00330 -o evidence.json
+python -m enzymeinfocollector.evidence_cli validate --accession P00330 --accession P00331 --refresh
+~~~
+
+The JSON exporter retains **all** distinct master and directional catalytic
+assertions and their individual ECO and citations. The validation command
+compares exact Rhea identifiers (master and LR/RL/BI) with the official
+`rhea2uniprot_sprot.tsv` and validates the Rhea direction/master mapping.
+It fails closed on stale or inconsistent mapping data and reports mismatches,
+not an EC cross-product. It refuses unreviewed TrEMBL entries because the
+reference mapping is Swiss-Prot only. The mapping digest covers the decoded
+UTF-8 TSV stream, not an asserted official Rhea release.
+
+The check does not establish biological truth or global completeness. A
+restored historical reference dataset will require pinned upstream bulk
+snapshots; the live tool uses current source releases and preserves retrieval
+provenance. Default CI validates the parser and report via offline fixtures.
