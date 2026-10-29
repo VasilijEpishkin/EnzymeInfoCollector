@@ -88,6 +88,34 @@ Rhea. При устаревших или противоречивых ответ
 [Описание API, ограничений и проверки на пяти белках](docs/architecture/direct_evidence.md).
 Базовые научные контракты: [evidence model](docs/architecture/evidence_model.md).
 
+## Экспериментальный Python API: ChEBI, KEGG и MetaCyc
+
+Модуль `compound_sources` обогащает химические соединения из Rhea
+данными ChEBI (основные/вторичные ID, формула, заряд, SMILES/InChI).
+Модуль `reaction_xrefs` загружает **только опубликованные Rhea**
+сопоставления реакций с KEGG и MetaCyc. Прямые API KEGG/MetaCyc не вызываются.
+Ни одна такая связь не считается доказательством катализа конкретным белком.
+
+~~~python
+from enzymeinfocollector.compound_sources import ChEBICollector
+from enzymeinfocollector.reaction_xrefs import RheaCrossReferenceCollector
+from enzymeinfocollector.sources import HttpCache, default_cache_dir, fetch_rhea
+
+cache = HttpCache(default_cache_dir())
+reactions, _ = fetch_rhea("1.1.1.1", cache)
+compounds = ChEBICollector(cache).enrich_rhea_records(reactions)
+crossrefs = RheaCrossReferenceCollector(cache).collect(["KEGG", "MetaCyc"])
+print(len(compounds.compounds), len(crossrefs.crossrefs))
+~~~
+
+Это ограниченный API без новых зависимостей и без изменений старой CLI.
+Он сохраняет SHA-256 и время получения HTTP-ответов, **но пока не
+фиксирует официальные ежемесячные релизы ChEBI**. Для массовых и
+строго воспроизводимых данных потребуется bulk snapshot. KEGG и MetaCyc
+не импортируются напрямую из-за лицензионных ограничений.
+
+[Архитектура, научные ограничения и следующие этапы](docs/architecture/enrichment_sources.md).
+
 ## Источники и разработка
 
 - [ExPASy ENZYME](https://enzyme.expasy.org/) — номенклатура и номера EC.
