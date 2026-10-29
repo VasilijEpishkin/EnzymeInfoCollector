@@ -129,6 +129,15 @@ print(len(compounds.compounds), len(crossrefs.crossrefs))
 
 [Архитектура, научные ограничения и следующие этапы](docs/architecture/enrichment_sources.md).
 
+## Эталонный набор данных (экспериментально)
+
+В модуле `enzymeinfocollector.reference_dataset` доступна детерминированная
+проекция прямых связей UniProt–Rhea и нормализованных ChEBI-соединений.
+Она не добавляет связи по общему EC и явно сохраняет отсутствующие реакции
+или неразрешённые идентификаторы. Пока это Python API для подготовленных
+входных снимков, **не** законченный опубликованный датасет пяти EC-классов.
+[Ограничения и пример использования](docs/architecture/reference_dataset.md).
+
 ## Источники и разработка
 
 - [ExPASy ENZYME](https://enzyme.expasy.org/) — номенклатура и номера EC.
