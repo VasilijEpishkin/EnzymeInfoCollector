@@ -4,9 +4,7 @@
 """
 from __future__ import annotations
 
-import tempfile
 import unittest
-from pathlib import Path
 
 from enzymeinfocollector.cli import main
 from enzymeinfocollector.collector import EnzymeCollector
