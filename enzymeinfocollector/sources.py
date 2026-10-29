@@ -543,6 +543,14 @@ def find_enzyme_entries(entries: list[dict[str, Any]], name: str) -> list[dict[s
     return sorted(matches, key=lambda item: item["ec_number"])
 
 
+def _validate_uniprot_header(fieldnames: list[str] | None, require_sequence: bool) -> None:
+    """Detect missing columns that would otherwise turn into empty scientific data."""
+    if not fieldnames or not any(name in fieldnames for name in ("Entry", "accession")):
+        raise DataSourceError("UniProt response did not contain the expected TSV header")
+    if require_sequence and not any(name in fieldnames for name in ("Sequence", "sequence")):
+        raise DataSourceError("UniProt TSV is missing the requested Sequence column")
+
+
 def fetch_uniprot(
     ec_number: str,
     cache: HttpCache,
@@ -566,13 +574,12 @@ def fetch_uniprot(
     url = f"{UNIPROT_URL}?{params}"
     response = cache.get(url, ttl_seconds=24 * 60 * 60, refresh=refresh)
     reader = csv.DictReader(io.StringIO(response.text), delimiter="\t")
-    if not reader.fieldnames or not any(name in reader.fieldnames for name in ("Entry", "accession")):
-        raise DataSourceError("UniProt response did not contain the expected TSV header")
+    _validate_uniprot_header(reader.fieldnames, include_sequence)
     records = []
     for row in reader:
         accession = _field(row, "Entry", "accession")
         if not accession:
-            continue
+            raise DataSourceError("UniProt TSV contains a record without an accession")
         records.append({
             "accession": accession,
             "entry_name": _field(row, "Entry Name", "id"),
@@ -624,7 +631,7 @@ def iter_uniprot(
             directory = sort_directory / hashlib.sha256(url.encode("utf-8")).hexdigest()
             directory.mkdir(parents=True, exist_ok=True)
             run_paths, metadata = _build_uniprot_sort_runs(
-                url, cache, directory, refresh=refresh
+                url, cache, directory, refresh=refresh, require_sequence=include_sequence
             )
             while len(run_paths) > UNIPROT_MERGE_FAN_IN:
                 run_paths = _merge_uniprot_runs(run_paths, directory)
@@ -645,7 +652,7 @@ def iter_uniprot(
         return
 
     with tempfile.TemporaryDirectory(prefix="enzymeinfocollector-sort-") as directory:
-        run_paths, metadata = _build_uniprot_sort_runs(url, cache, Path(directory), refresh=refresh)
+        run_paths, metadata = _build_uniprot_sort_runs(url, cache, Path(directory), refresh=refresh, require_sequence=include_sequence)
         while len(run_paths) > UNIPROT_MERGE_FAN_IN:
             run_paths = _merge_uniprot_runs(run_paths, Path(directory))
         with ExitStack() as stack:
@@ -658,28 +665,27 @@ def iter_uniprot(
 
 
 def _build_uniprot_sort_runs(
-    url: str, cache: HttpCache, directory: Path, *, refresh: bool
+    url: str, cache: HttpCache, directory: Path, *, refresh: bool, require_sequence: bool = False
 ) -> tuple[list[Path], dict[str, Any]]:
     if hasattr(cache, "open_text"):
         with cache.open_text(url, ttl_seconds=24 * 60 * 60, refresh=refresh) as (stream, metadata):  # type: ignore[attr-defined]
-            run_paths = _build_uniprot_runs(stream, directory)
+            run_paths = _build_uniprot_runs(stream, directory, require_sequence=require_sequence)
     else:
         response = cache.get(url, ttl_seconds=24 * 60 * 60, refresh=refresh)
         metadata = response.metadata
-        run_paths = _build_uniprot_runs(io.StringIO(response.text), directory)
+        run_paths = _build_uniprot_runs(io.StringIO(response.text), directory, require_sequence=require_sequence)
     return run_paths, metadata
 
 
-def _build_uniprot_runs(stream: TextIO, directory: Path) -> list[Path]:
+def _build_uniprot_runs(stream: TextIO, directory: Path, *, require_sequence: bool = False) -> list[Path]:
     reader = csv.DictReader(stream, delimiter="\t")
-    if not reader.fieldnames or not any(name in reader.fieldnames for name in ("Entry", "accession")):
-        raise DataSourceError("UniProt response did not contain the expected TSV header")
+    _validate_uniprot_header(reader.fieldnames, require_sequence)
     run_paths: list[Path] = []
     chunk: list[dict[str, Any]] = []
     for row in reader:
         accession = _field(row, "Entry", "accession")
         if not accession:
-            continue
+            raise DataSourceError("UniProt TSV contains a record without an accession")
         chunk.append({
             "accession": accession,
             "entry_name": _field(row, "Entry Name", "id"),
@@ -749,11 +755,13 @@ def fetch_rhea(ec_number: str, cache: HttpCache, *, refresh: bool = False) -> tu
     reader = csv.DictReader(io.StringIO(response.text), delimiter="\t")
     if not reader.fieldnames or not any(name in reader.fieldnames for name in ("Reaction identifier", "Rhea identifier", "Rhea ID", "rhea-id", "RHEA_ID")):
         raise DataSourceError("Rhea response did not contain the expected TSV header")
+    if not any(name in reader.fieldnames for name in ("Equation", "equation")):
+        raise DataSourceError("Rhea TSV is missing the requested Equation column")
     records = []
     for row in reader:
         rhea_id = _field(row, "Reaction identifier", "Rhea identifier", "Rhea ID", "rhea-id", "RHEA_ID")
-        if not rhea_id:
-            continue
+        if not re.fullmatch(r"(?:RHEA:)?\d+", rhea_id, re.IGNORECASE):
+            raise DataSourceError(f"Rhea TSV contains an invalid reaction ID: {rhea_id!r}")
         records.append({
             "rhea_id": rhea_id.removeprefix("RHEA:"),
             "equation": _field(row, "Equation", "equation"),
@@ -773,7 +781,12 @@ def fetch_reaction_smiles(cache: HttpCache, *, refresh: bool = False) -> tuple[d
     for row in csv.reader(io.StringIO(response.text), delimiter="\t"):
         match = re.fullmatch(r"(?:RHEA:)?(\d+)", row[0].strip(), re.IGNORECASE) if row else None
         if len(row) >= 2 and match:
-            smiles_by_id[match.group(1)] = row[1].strip()
+            reaction_id, smiles = match.group(1), row[1].strip()
+            if not smiles:
+                raise DataSourceError(f"Rhea reaction {reaction_id} has an empty SMILES value")
+            if reaction_id in smiles_by_id and smiles_by_id[reaction_id] != smiles:
+                raise DataSourceError(f"Rhea reaction {reaction_id} has conflicting SMILES records")
+            smiles_by_id[reaction_id] = smiles
     if not smiles_by_id:
         raise DataSourceError("Rhea reaction-SMILES download contained no reactions")
     return smiles_by_id, response.metadata
