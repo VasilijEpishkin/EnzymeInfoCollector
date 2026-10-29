@@ -6,6 +6,7 @@ import argparse
 import csv
 import json
 import logging
+import math
 import os
 import sys
 import tempfile
@@ -538,7 +539,7 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("one of --enzyme, --ec, --file, or --replay-manifest is required")
     if args.prepare_manifest and not args.save_manifest:
         parser.error("--prepare-manifest requires --save-manifest")
-    if args.timeout <= 0 or args.retries < 0:
+    if not math.isfinite(args.timeout) or args.timeout <= 0 or args.retries < 0:
         parser.error("--timeout must be positive and --retries must be non-negative")
     selected_format = _select_format(args.output, args.format)
     if args.stream_json and selected_format != "json":
