@@ -51,6 +51,21 @@ That comment must not be treated as a negative catalytic observation.
 P00519 contains `RHEA-COMP` references alongside `RHEA` IDs; these are
 compartment references, not Rhea reaction IDs.
 
+## TrEMBL smoke check (not part of the Swiss-Prot TSV comparison)
+
+An additional unreviewed UniProtKB entry,
+[A0A0C4DG85](https://rest.uniprot.org/uniprotkb/A0A0C4DG85.json),
+was processed through the experimental JSON export on 29 October 2026.
+The parser returned 12 direct Rhea annotations, with `reviewed: false`,
+`ECO:0000256` evidence and ARBA rule references (for example
+`ARBA:ARBA00050856`). No PubMed references were present in this sample.
+**Automatic rule evidence is not experimental proof.**
+
+The unreviewed sample was **not** compared with the compressed
+`rhea2uniprot_trembl.tsv.gz` (over 150 MB at the time of the check).
+The `validate_sources` command deliberately rejects unreviewed accessions
+because its comparison file covers only Swiss-Prot.
+
 ## Reproduce
 
 Run the **opt-in network validation**, not part of CI:
@@ -68,8 +83,8 @@ the existing HTTP cache and preserves the legacy CLI.
 1. Validate UniProt SPARQL RDF statement-level attribution and join
    annotations to REST comment-level evidence without falsely claiming
    that a JSON comment index is a persistent RDF statement URI.
-2. Broaden to more organisms and TrEMBL; the Swiss-Prot mapping alone is
-   insufficient to characterize unreviewed entries.
+2. Broaden to more organisms and validate TrEMBL against its own mapping;
+   the current TrEMBL check only verifies parsing and evidence preservation.
 3. Source licenses are verified as CC BY 4.0 (see
    `docs/architecture/data_licenses.md`); include attribution in exports
    and recheck any third-party datasets before redistribution.

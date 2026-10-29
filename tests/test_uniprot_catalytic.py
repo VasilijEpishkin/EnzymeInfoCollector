@@ -90,6 +90,17 @@ class UniProtCatalyticTests(unittest.TestCase):
             {ReactionDirection.UNDEFINED, ReactionDirection.LEFT_TO_RIGHT},
         )
 
+    def test_unreviewed_automatic_annotation_keeps_rule_source(self):
+        document = json.loads(json.dumps(DOCUMENT))
+        document["entryType"] = "UniProtKB unreviewed (TrEMBL)"
+        document["comments"][0]["reaction"]["evidences"] = [
+            {"evidenceCode": "ECO:0000256", "source": "ARBA", "id": "ARBA00050856"}
+        ]
+        entry = self.parse(document)
+        self.assertFalse(entry.reviewed)
+        self.assertEqual(entry.assertions[0].evidence[0].citation_ids, ())
+        self.assertEqual(entry.assertions[0].evidence[0].source_references, ("ARBA:ARBA00050856",))
+
     def test_missing_release_or_direction_is_error(self):
         with self.assertRaisesRegex(DataSourceError, "release header"):
             self.parse(metadata={"fetched_at": "2026-10-29T00:00:00Z"})

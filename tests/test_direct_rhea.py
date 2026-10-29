@@ -56,6 +56,8 @@ class DirectRheaTests(unittest.TestCase):
         assertions = assertions_from_direct_links(links, source_release=release, direction_lookup=lookup)
         self.assertEqual(len(assertions), 2)
         self.assertEqual(assertions[0].evidence[0].eco_code, None)
+        self.assertIsNone(assertions[0].evidence[0].source_statement_iri)
+        self.assertEqual(assertions[0].annotation_id, "http://purl.uniprot.org/uniprot/P00330#SOME_ANNOTATION")
         self.assertEqual(assertions[0].evidence[0].citation_ids, ())
         self.assertEqual(assertions[1].reaction.master_id, "RHEA:33198")
 
@@ -67,6 +69,10 @@ class DirectRheaTests(unittest.TestCase):
             fetch_direct_rhea_links(["P00330"], StaticCache([row]), limit=1)
         with self.assertRaisesRegex(DataSourceError, "Unexpected"):
             fetch_direct_rhea_links(["P00330"], StaticCache([{**row, "rhea": uri("https://evil.example/10740")}]))
+        with self.assertRaisesRegex(DataSourceError, "Unexpected UniProt accession"):
+            fetch_direct_rhea_links(["P00330"], StaticCache([{**row, "protein": uri("http://purl.uniprot.org/uniprot/P00331")}]))
+        with self.assertRaisesRegex(DataSourceError, "Invalid UniProt catalytic annotation URI"):
+            fetch_direct_rhea_links(["P00330"], StaticCache([{**row, "annotation": uri("http://evil.example/annotation")}]))
         with self.assertRaisesRegex(DataSourceError, "direction mapping"):
             assertions_from_direct_links(
                 [fetch_direct_rhea_links(["P00330"], StaticCache([row]))[0][0]],

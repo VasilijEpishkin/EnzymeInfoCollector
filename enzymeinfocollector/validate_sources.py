@@ -72,6 +72,8 @@ def validate_sample(
         fetch_uniprot_catalytic_entry(accession, cache, directions.lookup, refresh=refresh)
         for accession in accessions
     ]
+    if any(not entry.reviewed for entry in entries):
+        raise ValueError("Rhea Swiss-Prot mapping validation requires reviewed UniProtKB accessions")
     with cache.open_text(RHEA_SPROT_MAPPING_URL, ttl_seconds=24 * 60 * 60, refresh=refresh) as (stream, meta):
         mapped, row_count = parse_sprot_mapping(stream, set(accessions), directions.lookup)
     records = []
