@@ -212,7 +212,7 @@ class EvidenceSourcesTests(unittest.TestCase):
         for bad in ([], ["not-an-accession"], "P00330", ["P00330", "P00330/../../"]):
             with self.subTest(bad=bad), self.assertRaises(ValueError):
                 DirectEvidenceCollector(cache).collect(bad)
-        self.assertEqual(cache.calls, ( ) if isinstance(cache.calls, tuple) else [])
+        self.assertEqual(cache.calls, [])
 
     def test_unreviewed_entry_retains_unknown_evidence(self) -> None:
         data = copy.deepcopy(SAMPLE)
