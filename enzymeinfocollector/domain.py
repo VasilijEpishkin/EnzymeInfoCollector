@@ -166,6 +166,7 @@ class Evidence:
     assertion_method: AssertionMethod = AssertionMethod.UNKNOWN
     source_statement_iri: str | None = None
     citation_ids: tuple[str, ...] = ()
+    source_references: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         object.__setattr__(self, "source_database", _nonempty(self.source_database, "source_database"))
@@ -176,6 +177,8 @@ class Evidence:
             _nonempty(self.source_statement_iri, "source_statement_iri")
         citations = tuple(_nonempty(value, "citation ID") for value in self.citation_ids)
         object.__setattr__(self, "citation_ids", citations)
+        references = tuple(_nonempty(value, "source reference") for value in self.source_references)
+        object.__setattr__(self, "source_references", references)
 
 
 @dataclass(frozen=True, slots=True)

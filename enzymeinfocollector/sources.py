@@ -208,6 +208,9 @@ class HttpCache:
                     "fetched_at": utc_now(),
                     "etag": response_headers.get("ETag"),
                     "last_modified": response_headers.get("Last-Modified"),
+                    "uniprot_release": response_headers.get("X-UniProt-Release"),
+                    "uniprot_release_date": response_headers.get("X-UniProt-Release-Date"),
+                    "body_sha256": hashlib.sha256(payload).hexdigest(),
                     "cached": False,
                     "stale": False,
                 }
@@ -308,6 +311,7 @@ class HttpCache:
                 descriptor, temp_name = tempfile.mkstemp(prefix=f".{body_path.name}.", suffix=".tmp", dir=self.directory)
                 temp_path = Path(temp_name)
                 decoder = codecs.getincrementaldecoder("utf-8-sig")()
+                body_digest = hashlib.sha256()
                 size = 0
                 try:
                     with os.fdopen(descriptor, "wb") as output, response:
@@ -322,6 +326,7 @@ class HttpCache:
                             if size > MAX_RESPONSE_BYTES:
                                 raise DataSourceError(f"Response from {urllib.parse.urlparse(url).netloc} exceeds 100 MiB")
                             decoder.decode(chunk)
+                            body_digest.update(chunk)
                             output.write(chunk)
                         decoder.decode(b"", final=True)
                         output.flush()
@@ -331,6 +336,9 @@ class HttpCache:
                         "fetched_at": utc_now(),
                         "etag": response.headers.get("ETag"),
                         "last_modified": response.headers.get("Last-Modified"),
+                        "uniprot_release": response.headers.get("X-UniProt-Release"),
+                        "uniprot_release_date": response.headers.get("X-UniProt-Release-Date"),
+                        "body_sha256": body_digest.hexdigest(),
                         "cached": False,
                         "stale": False,
                     }
