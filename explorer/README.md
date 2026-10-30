@@ -79,7 +79,7 @@ checks that all five nodes/four edges render in the browser. That smoke check
 downloads the pinned Cytoscape.js script from its CDN.
 
 Interactive desktop/mobile review with real user-selected JSON files and
-the currently unavailable taxon/EC-classification filters remain follow-ups
+taxonomic *subtree* filtering and richer EC-first discovery remain follow-ups
 before closing issue #4.
 
 **Privacy note:** the user's JSON is read in the page via the local File

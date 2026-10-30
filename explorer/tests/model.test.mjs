@@ -128,3 +128,22 @@ test("legacy graphs without taxonomy/EC are still readable and marked unknown",(
   assert.throws(() => neighborhood(graph,"protein:P00001",
     {taxonId:"9606",ecNumber:"1.11.1.6"}),/фильтрам/);
 });
+
+test("source reference hash and optional protein scope survive viewer subgraph export",() => {
+  const loaded=structuredClone(source);
+  loaded.reference_sha256="a".repeat(64);
+  loaded.scope={protein:"P00001"};
+  const graph=validateGraph(loaded);
+  const view=neighborhood(graph,"protein:P00001",{maxNodes:2});
+  const exported=subgraph(graph,view);
+  assert.equal(exported.reference_sha256,"a".repeat(64));
+  assert.deepEqual(exported.scope,{protein:"P00001"});
+  assert.doesNotThrow(()=>validateGraph(exported));
+});
+test("HTML contains interactive taxonomy and EC controls and pins Cytoscape CDN integrity",() => {
+  const html=readFileSync(new URL("../index.html",import.meta.url),"utf8");
+  for (const id of ["taxon-id","ec-number","filter-reviewed","file-input","demo"]) {
+    assert.ok(html.includes('id="'+id+'"'),"Missing UI element: "+id);
+  }
+  assert.match(html,/integrity="sha384-[A-Za-z0-9+/=]+"/);
+});

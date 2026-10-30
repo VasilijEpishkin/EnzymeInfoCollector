@@ -297,8 +297,8 @@ def parse_uniprot_catalytic_activities(
     entry_version = _positive_version(audit.get("entryVersion"), "entryVersion")
     sequence_version = _positive_version(audit.get("sequenceVersion"), "sequenceVersion")
     entry_type = data.get("entryType")
-    if not isinstance(entry_type, str):
-        raise DataSourceError(f"UniProt {accession} is missing entryType")
+    if entry_type not in ("UniProtKB reviewed (Swiss-Prot)", "UniProtKB unreviewed (TrEMBL)"):
+        raise DataSourceError(f"UniProt {accession} has an unsupported entryType {entry_type!r}")
     reviewed = entry_type == "UniProtKB reviewed (Swiss-Prot)"
     comments = data.get("comments", [])
     if not isinstance(comments, list):

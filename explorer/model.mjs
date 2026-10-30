@@ -69,6 +69,10 @@ export function validateGraph(document) {
     schema_version: document.schema_version,
     provenance: document.provenance,
     semantics: isObject(document.semantics) ? document.semantics : {},
+    ...(typeof document.reference_sha256 === "string"
+      ? { reference_sha256: document.reference_sha256 } : {}),
+    ...(isObject(document.scope) ? { scope: document.scope } : {}),
+    ...(isObject(document.view) ? { view: document.view } : {}),
     elements: {
       nodes: nodes.sort(stableId),
       edges: edges.sort(stableId),
@@ -172,6 +176,9 @@ export function subgraph(graph, view) {
     schema_version: graph.schema_version,
     semantics: graph.semantics,
     provenance: graph.provenance,
+    ...(typeof graph.reference_sha256 === "string"
+      ? { reference_sha256: graph.reference_sha256 } : {}),
+    ...(isObject(graph.scope) ? { scope: graph.scope } : {}),
     view: {
       root_id: view.rootId,
       depth: view.depth,

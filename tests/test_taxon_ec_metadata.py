@@ -82,6 +82,13 @@ class TaxonECTests(unittest.TestCase):
             with self.subTest(field=field, value=value), self.assertRaises(DataSourceError):
                 parse_uniprot_catalytic_activities(entry, self.release, self.directions)
 
+    def test_unsupported_entry_type_is_not_silently_treated_as_unreviewed(self):
+        from enzymeinfocollector.sources import DataSourceError
+        entry = self.entry()
+        entry["entryType"] = "Unrecognized UniProtKB entryType"
+        with self.assertRaisesRegex(DataSourceError, "unsupported entryType"):
+            parse_uniprot_catalytic_activities(entry, self.release, self.directions)
+
     def test_classification_does_not_create_catalytic_assertions(self):
         entry = self.entry()
         entry["comments"] = []

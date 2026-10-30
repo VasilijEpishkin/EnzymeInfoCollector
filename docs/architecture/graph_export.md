@@ -73,3 +73,11 @@ A protein with no direct annotations yields a single Protein node and no
 catalytic edges. An accession absent from the input is an error; the output
 file remains unchanged. The original collection-level provenance is retained
 alongside the scoped elements.
+
+## GraphML graph-level metadata (audit correction)
+
+GraphML now retains `provenance`, `semantics`, `schema_version`,
+`reference_sha256` and, when selected, `scope` as GraphML graph data
+attributes. Structured values are canonical JSON strings; they can be
+parsed by downstream tools. The selected reference SHA is a verification
+handle, not an official UniProt/Rhea release identifier.
