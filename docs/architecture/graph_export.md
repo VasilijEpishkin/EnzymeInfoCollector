@@ -55,3 +55,20 @@ Graph projection is network-free and uses only Python's standard library.
 - No Cytoscape.js application is included in this PR; browser UI is planned
   separately.
 - No mass-balance or atom-mapping chemistry validation is claimed.
+
+## Optional protein neighborhood filter
+
+The graph CLI accepts `--protein P04040` to retain exactly one UniProt
+protein, its **already annotated** Rhea master reactions, and the corresponding
+compound participants, without introducing EC-derived links. This is an
+offline subgraph projection and does not query the remote databases again:
+
+~~~bash
+python -m enzymeinfocollector.graph_cli integrated.json \
+  --format cytoscape-json --protein P04040 -o neighborhood.json
+~~~
+
+A protein with no direct annotations yields a single Protein node and no
+catalytic edges. An accession absent from the input is an error; the output
+file remains unchanged. The original collection-level provenance is retained
+alongside the scoped elements.

@@ -43,7 +43,7 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def project_graph(reference: Mapping[str, Any]) -> dict[str, Any]:
+def project_graph(reference: Mapping[str, Any], *, protein: str | None = None) -> dict[str, Any]:
     """Convert a verified reference result to typed nodes and directed edges.
 
     Contains only source-justified relationships: Protein CATALYZES Reaction
@@ -101,20 +101,20 @@ def project_graph(reference: Mapping[str, Any]) -> dict[str, Any]:
     seen_proteins = set()
     pending_catalytic = []
     for item in _rows(reference.get("proteins"), "proteins"):
-        protein = _object(item, "protein")
-        accession = _identifier(protein.get("accession"), _UNIPROT, "UniProt accession")
+        protein_record = _object(item, "protein")
+        accession = _identifier(protein_record.get("accession"), _UNIPROT, "UniProt accession")
         if accession in seen_proteins:
             raise DataSourceError(f"Duplicate protein {accession}")
         seen_proteins.add(accession)
         add_node({
             "id": f"protein:{accession}", "node_type": "Protein",
             "label": accession, "accession": accession,
-            "reviewed": protein.get("reviewed"),
-            "entry_version": protein.get("entry_version"),
-            "sequence_version": protein.get("sequence_version"),
-            "source_release": protein.get("source_release"),
+            "reviewed": protein_record.get("reviewed"),
+            "entry_version": protein_record.get("entry_version"),
+            "sequence_version": protein_record.get("sequence_version"),
+            "source_release": protein_record.get("source_release"),
         })
-        for raw_assertion in _rows(protein.get("direct_assertions"), "direct_assertions"):
+        for raw_assertion in _rows(protein_record.get("direct_assertions"), "direct_assertions"):
             assertion = _object(raw_assertion, "direct assertion")
             reaction = _object(assertion.get("reaction"), "assertion reaction")
             master = _identifier(reaction.get("master_id"), _RHEA, "asserted Rhea master")
@@ -170,7 +170,7 @@ def project_graph(reference: Mapping[str, Any]) -> dict[str, Any]:
                 "coefficient": coefficient,
             })
 
-    return {
+    result = {
         "schema_version": GRAPH_SCHEMA,
         "semantics": {
             "catalysis": "direct UniProtKB annotation only, never EC join",
@@ -181,6 +181,36 @@ def project_graph(reference: Mapping[str, Any]) -> dict[str, Any]:
         "elements": {
             "nodes": [{"data": nodes[k]} for k in sorted(nodes)],
             "edges": [{"data": edges[k]} for k in sorted(edges)],
+        },
+    }
+    return select_protein_neighborhood(result, protein) if protein is not None else result
+
+
+def select_protein_neighborhood(graph: Mapping[str, Any], protein: str) -> dict[str, Any]:
+    """Select one UniProt protein, its annotated reactions and their compounds.
+
+    Filtering is by already-asserted edges; no new catalysis claims or EC
+    joins are introduced. Original source provenance remains attached.
+    """
+    accession = _identifier(protein, _UNIPROT, "UniProt accession")
+    root = "protein:" + accession
+    elements = _object(graph.get("elements"), "graph elements")
+    nodes = _rows(elements.get("nodes"), "nodes")
+    edges = _rows(elements.get("edges"), "edges")
+    if not any(_object(item.get("data"), "graph node").get("id") == root for item in nodes):
+        raise DataSourceError(f"Protein {accession} is absent from the graph result")
+    catalysis = [item for item in edges if item["data"].get("relation") == "CATALYZES"
+                 and item["data"].get("source") == root]
+    reaction_ids = {item["data"]["target"] for item in catalysis}
+    participants = [item for item in edges if item["data"].get("relation") == "HAS_PARTICIPANT"
+                    and item["data"].get("source") in reaction_ids]
+    active = {root} | reaction_ids | {item["data"]["target"] for item in participants}
+    return {
+        **graph,
+        "scope": {"protein": accession},
+        "elements": {
+            "nodes": [item for item in nodes if item["data"]["id"] in active],
+            "edges": [item for item in edges if item in catalysis or item in participants],
         },
     }
 

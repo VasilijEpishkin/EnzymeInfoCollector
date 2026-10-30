@@ -181,5 +181,51 @@ class EvidenceGraphTests(unittest.TestCase):
                 project_graph(item)
 
 
+    def test_scoped_neighborhood_contains_only_selected_protein_and_related_chemistry(self):
+        item = reference()
+        other = deepcopy(item["proteins"][0])
+        other["accession"] = "P00331"
+        other["direct_assertions"] = []
+        other["ec_numbers"] = ["1.11.1.6"]
+        item["proteins"].append(other)
+        full = project_graph(item)
+        selected = project_graph(item, protein="P04040")
+        self.assertEqual(len(full["elements"]["nodes"]), 6)
+        self.assertEqual(len(selected["elements"]["nodes"]), 5)
+        self.assertFalse(any(n["data"]["id"] == "protein:P00331"
+                             for n in selected["elements"]["nodes"]))
+        self.assertTrue(all(
+            e["data"]["source"] != "protein:P00331"
+            for e in selected["elements"]["edges"]
+        ))
+        self.assertEqual(selected["scope"], {"protein": "P04040"})
+        self.assertEqual(selected["provenance"], full["provenance"])
+        self.assertEqual(len(selected["elements"]["edges"]), 5)
+
+        isolated = project_graph(item, protein="P00331")
+        self.assertEqual([n["data"]["id"] for n in isolated["elements"]["nodes"]],
+                         ["protein:P00331"])
+        self.assertEqual(isolated["elements"]["edges"], [])
+
+    def test_scoped_export_unknown_protein_and_cli_file_preservation(self):
+        with self.assertRaisesRegex(DataSourceError, "absent"):
+            project_graph(reference(), protein="P00001")
+        with self.assertRaisesRegex(DataSourceError, "UniProt accession"):
+            project_graph(reference(), protein="P04040>bad")
+        with tempfile.TemporaryDirectory() as directory:
+            input_path = Path(directory, "verified.json")
+            output = Path(directory, "scoped.json")
+            input_path.write_text(json.dumps(reference()), encoding="utf-8")
+            rc = main([str(input_path), "--format", "cytoscape-json",
+                       "--protein", "P04040", "-o", str(output)])
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(output.read_text())["scope"], {"protein": "P04040"})
+            original = output.read_bytes()
+            rc = main([str(input_path), "--format", "cytoscape-json",
+                       "--protein", "P00001", "-o", str(output)])
+            self.assertEqual(rc, 1)
+            self.assertEqual(output.read_bytes(), original)
+
+
 if __name__ == "__main__":
     unittest.main()
