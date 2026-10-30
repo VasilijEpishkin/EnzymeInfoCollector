@@ -69,6 +69,10 @@ export function validateGraph(document) {
     schema_version: document.schema_version,
     provenance: document.provenance,
     semantics: isObject(document.semantics) ? document.semantics : {},
+    ...(typeof document.reference_sha256 === "string"
+      ? { reference_sha256: document.reference_sha256 } : {}),
+    ...(isObject(document.scope) ? { scope: document.scope } : {}),
+    ...(isObject(document.view) ? { view: document.view } : {}),
     elements: {
       nodes: nodes.sort(stableId),
       edges: edges.sort(stableId),
@@ -103,11 +107,21 @@ export function neighborhood(graph, rootId, options = {}) {
   const showParticipants = options.showParticipants !== false;
   const reviewedOnly = options.reviewedOnly === true;
   const ecoFilter = String(options.eco || "").trim().toUpperCase();
+  const taxonId = String(options.taxonId ?? "").trim();
+  const ecNumber = String(options.ecNumber || "").trim().toLowerCase().replace(/^ec[ :]+/, "");
+  assert(!taxonId || /^[1-9][0-9]*$/.test(taxonId), "Taxon ID должен быть положительным числом.");
+  assert(!ecNumber || /^[1-7]\.(?:[0-9]+|-|n[0-9]+)\.(?:[0-9]+|-|n[0-9]+)\.(?:[0-9]+|-|n[0-9]+)$/i.test(ecNumber),
+    "Введите EC в формате 1.11.1.6.");
   const acceptedNode = (nodeId) => {
     const data = byId.get(nodeId)?.data;
-    return data && (!reviewedOnly || data.node_type !== "Protein" || data.reviewed === true);
+    if (!data) return false;
+    if (data.node_type !== "Protein") return true;
+    return (!reviewedOnly || data.reviewed === true)
+      && (!taxonId || String(data.taxon_id ?? "") === taxonId)
+      && (!ecNumber || (Array.isArray(data.ec_numbers) && data.ec_numbers.some(
+        (assigned) => String(assigned).toLowerCase() === ecNumber)));
   };
-  assert(acceptedNode(rootId), "Для выбранного белка включён фильтр Reviewed.");
+  assert(acceptedNode(rootId), "Выбранный белок не соответствует фильтрам Reviewed / taxon / EC.");
   const eligible = graph.elements.edges.filter(({ data }) => {
     if (data.relation === "CATALYZES" && !showCatalysis) return false;
     if (data.relation === "HAS_PARTICIPANT" && !showParticipants) return false;
@@ -152,7 +166,8 @@ export function neighborhood(graph, rootId, options = {}) {
     rootId,
     depth,
     truncated,
-    options: { showCatalysis, showParticipants, reviewedOnly, eco: ecoFilter },
+    options: { showCatalysis, showParticipants, reviewedOnly, eco: ecoFilter,
+      taxonId, ecNumber },
   };
 }
 
@@ -161,6 +176,9 @@ export function subgraph(graph, view) {
     schema_version: graph.schema_version,
     semantics: graph.semantics,
     provenance: graph.provenance,
+    ...(typeof graph.reference_sha256 === "string"
+      ? { reference_sha256: graph.reference_sha256 } : {}),
+    ...(isObject(graph.scope) ? { scope: graph.scope } : {}),
     view: {
       root_id: view.rootId,
       depth: view.depth,

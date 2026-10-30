@@ -155,6 +155,9 @@ def build_reference_dataset(
             "reviewed": protein.reviewed,
             "entry_version": protein.entry_version,
             "sequence_version": protein.sequence_version,
+            "taxon_id": protein.taxon_id,
+            "organism_name": protein.organism_name,
+            "ec_numbers": list(protein.ec_numbers),
             "source_release": asdict(protein.source_release),
             "direct_assertions": [
                 asdict(assertion) for assertion in sorted(

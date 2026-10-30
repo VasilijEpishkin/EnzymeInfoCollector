@@ -112,6 +112,9 @@ def project_graph(reference: Mapping[str, Any], *, protein: str | None = None) -
             "reviewed": protein_record.get("reviewed"),
             "entry_version": protein_record.get("entry_version"),
             "sequence_version": protein_record.get("sequence_version"),
+            "taxon_id": protein_record.get("taxon_id"),
+            "organism_name": protein_record.get("organism_name"),
+            "ec_numbers": protein_record.get("ec_numbers", []),
             "source_release": protein_record.get("source_release"),
         })
         for raw_assertion in _rows(protein_record.get("direct_assertions"), "direct_assertions"):
@@ -178,6 +181,7 @@ def project_graph(reference: Mapping[str, Any], *, protein: str | None = None) -
             "unknown_is_not_negative": True,
         },
         "provenance": provenance,
+        "reference_sha256": reference.get("semantic_sha256"),
         "elements": {
             "nodes": [{"data": nodes[k]} for k in sorted(nodes)],
             "edges": [{"data": edges[k]} for k in sorted(edges)],
@@ -235,12 +239,19 @@ def to_graphml(graph: Mapping[str, Any]) -> str:
                 "id": f"{category}_{key}", "for": category,
                 "attr.name": key, "attr.type": "string",
             })
-    ET.SubElement(root, tag("key"), {
-        "id": "graph_provenance", "for": "graph",
-        "attr.name": "provenance", "attr.type": "string",
-    })
+    for name in ("provenance", "semantics", "schema_version", "reference_sha256", "scope"):
+        ET.SubElement(root, tag("key"), {
+            "id": f"graph_{name}", "for": "graph",
+            "attr.name": name, "attr.type": "string",
+        })
     target = ET.SubElement(root, tag("graph"), {"id": "enzyme-evidence", "edgedefault": "directed"})
-    ET.SubElement(target, tag("data"), {"key": "graph_provenance"}).text = _json(graph.get("provenance"))
+    # Keep provenance first for older GraphML readers that inspect first data.
+    for name in ("provenance", "semantics", "schema_version", "reference_sha256", "scope"):
+        if name in graph:
+            value = graph[name]
+            ET.SubElement(target, tag("data"), {"key": f"graph_{name}"}).text = (
+                value if isinstance(value, str) else _json(value)
+            )
     for category, rows in (("node", nodes), ("edge", edges)):
         for row in rows:
             data = _object(row.get("data"), category)

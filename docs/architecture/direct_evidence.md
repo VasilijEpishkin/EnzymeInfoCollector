@@ -118,3 +118,12 @@ The check does not establish biological truth or global completeness. A
 restored historical reference dataset will require pinned upstream bulk
 snapshots; the live tool uses current source releases and preserves retrieval
 provenance. Default CI validates the parser and report via offline fixtures.
+
+## Optional protein metadata for search
+
+Read `organism.taxonId` and `organism.scientificName` from UniProtKB REST,
+and EC assignments from `proteinDescription.*Name.ecNumbers`. Unknown
+fields remain null/empty; invalid populated values fail closed. Taxonomy and
+EC are **protein classifications**, not protein-to-reaction catalysis evidence.
+The graph explorer's taxonomy match is exact and does not imply membership
+of descendant taxa.

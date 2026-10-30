@@ -133,6 +133,26 @@ class EvidenceGraphTests(unittest.TestCase):
         provenance = root.find(".//g:graph/g:data", ns)
         self.assertEqual(json.loads(provenance.text)["uniprot_release"], "2026_03")
 
+    def test_graphml_preserves_scientific_semantics_and_reference_scope(self):
+        from enzymeinfocollector.graph_export import select_protein_neighborhood
+        item = reference()
+        item["semantic_sha256"] = "a" * 64
+        graph = select_protein_neighborhood(project_graph(item), "P04040")
+        xml = ET.fromstring(to_graphml(graph))
+        ns = {"g": GRAPHML_NS}
+        keys = {
+            element.attrib["id"]: element.attrib.get("attr.name")
+            for element in xml.findall(".//g:key", ns)
+        }
+        values = {
+            keys[element.attrib["key"]]: element.text
+            for element in xml.findall(".//g:graph/g:data", ns)
+        }
+        self.assertEqual(values["schema_version"], "2.0-graph-preview")
+        self.assertEqual(values["reference_sha256"], "a" * 64)
+        self.assertEqual(json.loads(values["semantics"])["unknown_is_not_negative"], True)
+        self.assertEqual(json.loads(values["scope"]), {"protein": "P04040"})
+
     def test_graph_json_stable_across_equivalent_record_order(self):
         one = reference()
         two = deepcopy(one)

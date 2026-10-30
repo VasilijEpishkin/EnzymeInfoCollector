@@ -24,7 +24,12 @@
           "source_release": {
             "database": "Synthetic",
             "release": "demo-only"
-          }
+          },
+          "taxon_id": 9606,
+          "organism_name": "Homo sapiens (synthetic UI fixture)",
+          "ec_numbers": [
+            "1.11.1.6"
+          ]
         }
       },
       {

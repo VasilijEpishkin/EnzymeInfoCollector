@@ -70,6 +70,10 @@ class ProteinEvidenceRecord:
     sequence_version: int
     source_release: SourceRelease
     assertions: tuple[ProteinReactionAssertion, ...]
+    # These are UniProt classifications/organism annotations, NOT catalysis evidence.
+    taxon_id: int | None = None
+    organism_name: str | None = None
+    ec_numbers: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -216,6 +220,62 @@ def _positive_version(value: Any, label: str) -> int:
     return value
 
 
+_EC_NUMBER = re.compile(r"[1-7]\.(?:[0-9]+|-|n[0-9]+)\.(?:[0-9]+|-|n[0-9]+)\.(?:[0-9]+|-|n[0-9]+)", re.IGNORECASE)
+
+
+def _protein_metadata(data: Mapping[str, Any]) -> tuple[int | None, str | None, tuple[str, ...]]:
+    """Read exact organism taxon and classified ECs from UniProtKB JSON.
+
+    EC classification is an attribute of the protein description, not a
+    certificate that the protein catalyzes every Rhea reaction with that EC.
+    Unavailable fields remain unknown; malformed populated fields fail closed.
+    """
+    organism = data.get("organism")
+    if organism is not None and not isinstance(organism, dict):
+        raise DataSourceError("UniProt organism must be an object")
+    taxon_id = None
+    organism_name = None
+    if organism is not None:
+        taxon_id = organism.get("taxonId")
+        if taxon_id is not None and (type(taxon_id) is not int or taxon_id <= 0):
+            raise DataSourceError("UniProt taxonId must be a positive integer")
+        organism_name = organism.get("scientificName")
+        if organism_name is not None and (not isinstance(organism_name, str) or not organism_name.strip()):
+            raise DataSourceError("UniProt scientificName must be nonempty")
+    description = data.get("proteinDescription")
+    if description is not None and not isinstance(description, dict):
+        raise DataSourceError("UniProt proteinDescription must be an object")
+    ec_numbers: set[str] = set()
+    if description:
+        names: list[dict[str, Any]] = []
+        for key in ("recommendedName",):
+            name = description.get(key)
+            if name is not None:
+                if not isinstance(name, dict):
+                    raise DataSourceError(f"UniProt {key} must be an object")
+                names.append(name)
+        for key in ("alternativeNames", "submissionNames"):
+            values = description.get(key, [])
+            if not isinstance(values, list):
+                raise DataSourceError(f"UniProt {key} must be a list")
+            for value in values:
+                if not isinstance(value, dict):
+                    raise DataSourceError(f"UniProt {key} contains an invalid entry")
+                names.append(value)
+        for name in names:
+            assignments = name.get("ecNumbers", [])
+            if not isinstance(assignments, list):
+                raise DataSourceError("UniProt ecNumbers must be a list")
+            for assignment in assignments:
+                if not isinstance(assignment, dict):
+                    raise DataSourceError("UniProt EC assignment must be an object")
+                value = assignment.get("value")
+                if not isinstance(value, str) or _EC_NUMBER.fullmatch(value) is None:
+                    raise DataSourceError(f"Invalid UniProt EC assignment {value!r}")
+                ec_numbers.add(value)
+    return taxon_id, organism_name.strip() if organism_name else None, tuple(sorted(ec_numbers))
+
+
 def parse_uniprot_catalytic_activities(
     data: Mapping[str, Any],
     source_release: SourceRelease,
@@ -237,8 +297,8 @@ def parse_uniprot_catalytic_activities(
     entry_version = _positive_version(audit.get("entryVersion"), "entryVersion")
     sequence_version = _positive_version(audit.get("sequenceVersion"), "sequenceVersion")
     entry_type = data.get("entryType")
-    if not isinstance(entry_type, str):
-        raise DataSourceError(f"UniProt {accession} is missing entryType")
+    if entry_type not in ("UniProtKB reviewed (Swiss-Prot)", "UniProtKB unreviewed (TrEMBL)"):
+        raise DataSourceError(f"UniProt {accession} has an unsupported entryType {entry_type!r}")
     reviewed = entry_type == "UniProtKB reviewed (Swiss-Prot)"
     comments = data.get("comments", [])
     if not isinstance(comments, list):
@@ -302,6 +362,7 @@ def parse_uniprot_catalytic_activities(
         )
         for rhea_id, evidences in sorted(grouped.items(), key=lambda item: int(item[0].split(":")[1]))
     )
+    taxon_id, organism_name, ec_numbers = _protein_metadata(data)
     return ProteinEvidenceRecord(
         accession=accession,
         reviewed=reviewed,
@@ -309,6 +370,9 @@ def parse_uniprot_catalytic_activities(
         sequence_version=sequence_version,
         source_release=source_release,
         assertions=assertions,
+        taxon_id=taxon_id,
+        organism_name=organism_name,
+        ec_numbers=ec_numbers,
     )
 
 

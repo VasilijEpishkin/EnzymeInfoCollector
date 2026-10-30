@@ -7,7 +7,7 @@
   <title>EnzymeInfoCollector — Evidence Explorer</title>
   <meta name="description" content="Локальный просмотр прямых связей UniProt, Rhea и ChEBI с доказательствами.">
   <link rel="stylesheet" href="./styles.css">
-  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.4/dist/cytoscape.min.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.4/dist/cytoscape.min.js" integrity="sha384-lyd1lDWZ623YSUJ/wMQH50y+T81dWKJk7ZoFdYWXQS83b0+QpW0pgdfXEnQnXL/X" crossorigin="anonymous"></script>
   <script type="module" src="./app.mjs"></script>
 </head>
 <body>
@@ -60,10 +60,16 @@
             <label><input id="filter-participants" type="checkbox" checked disabled> Участников реакций</label>
             <label><input id="filter-reviewed" type="checkbox" disabled> Только reviewed белки</label>
           </fieldset>
+          <label for="taxon-id">Таксон (точный UniProt taxonomy ID)</label>
+          <input id="taxon-id" type="search" inputmode="numeric" placeholder="Например, 9606" disabled>
+          <p class="hint">Точный taxon ID: потомки не включаются автоматически.</p>
+          <label for="ec-number">Классификация EC белка</label>
+          <input id="ec-number" type="search" placeholder="Например, 1.11.1.6" disabled>
+          <p class="hint">EC — классификация, а не доказательство связи белка с реакцией.</p>
           <label for="eco">ECO-код для каталитических связей</label>
           <input id="eco" type="search" placeholder="Например, ECO:0000269" disabled>
           <p class="hint">Если код указан, неподходящие каталитические связи скрываются. Отсутствие ECO — не отрицательное доказательство.</p>
-          <p class="hint">Фильтр по таксону появится после добавления таксона в формат экспорта.</p>
+
         </section>
       </aside>
 

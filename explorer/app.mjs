@@ -2,7 +2,7 @@ import { MAX_FILE_BYTES, validateGraph, searchNodes, neighborhood, subgraph } fr
 
 const $ = (id) => document.getElementById(id);
 const controls = ["search","depth","node-limit","filter-catalysis","filter-participants",
-                  "filter-reviewed","eco","fit","export"];
+                  "filter-reviewed","taxon-id","ec-number","eco","fit","export"];
 let graph = null, cy = null, rootId = null, selectedId = null, visible = null, filename = "graph";
 
 function el(tag, cls, value) {
@@ -90,6 +90,10 @@ function inspect(data, isEdge) {
       addField(panel,"Reviewed",data.reviewed === true ? "Да (Swiss-Prot)" : "Нет/неизвестно");
       addField(panel,"Версия записи",data.entry_version);
       addField(panel,"Версия последовательности",data.sequence_version);
+      addField(panel,"Таксон NCBI",data.taxon_id);
+      addField(panel,"Организм",data.organism_name);
+      addField(panel,"Классификация EC (не прямое доказательство катализа)",
+        Array.isArray(data.ec_numbers) && data.ec_numbers.length ? data.ec_numbers.join(", ") : null);
     } else if (data.node_type === "Reaction") {
       addField(panel,"Основной Rhea ID",data.rhea_master_id);
       addField(panel,"Уравнение",data.equation);
@@ -124,6 +128,8 @@ function options() {
     showCatalysis: $("filter-catalysis").checked,
     showParticipants: $("filter-participants").checked,
     reviewedOnly: $("filter-reviewed").checked,
+    taxonId: $("taxon-id").value.trim(),
+    ecNumber: $("ec-number").value.trim(),
     eco: $("eco").value.trim(),
   };
 }
@@ -207,7 +213,15 @@ function render() {
     if (selectedId && viewer.getElementById(selectedId).nonempty()) selectElement(selectedId);
     else selectElement(rootId);
     searchResults();
-  } catch (error) { status("Ошибка отображения: " + error.message); }
+  } catch (error) {
+    if (cy) cy.elements().remove(); // Never retain an old, misleading view.
+    visible = null;
+    $("empty-state").hidden = false;
+    $("focus-title").textContent = "Нет связей по выбранным фильтрам";
+    $("graph-count").textContent = "0 узлов · 0 связей";
+    inspect(null,false);
+    status("Ошибка фильтра: " + error.message);
+  }
 }
 async function load(data,name,isDemo) {
   const validated = validateGraph(data);
@@ -215,7 +229,7 @@ async function load(data,name,isDemo) {
   graph = validated;
   filename = name;
   $("dataset-name").textContent = isDemo ? "ДЕМО — синтетические данные" : name;
-  $("search").value = ""; $("eco").value = "";
+  $("search").value = ""; $("eco").value = ""; $("taxon-id").value = ""; $("ec-number").value = "";
   $("depth").value = "2"; $("node-limit").value = "80";
   $("filter-catalysis").checked = true; $("filter-participants").checked = true;
   $("filter-reviewed").checked = false;
@@ -256,8 +270,8 @@ $("demo").addEventListener("click",async () => {
 });
 $("search").addEventListener("input",searchResults);
 for (const id of ["depth","node-limit","filter-catalysis","filter-participants",
-                   "filter-reviewed","eco"]) {
-  $(id).addEventListener(id === "eco" ? "input" : "change",render);
+                   "filter-reviewed","taxon-id","ec-number","eco"]) {
+  $(id).addEventListener(["eco","taxon-id","ec-number"].includes(id) ? "input" : "change",render);
 }
 $("fit").addEventListener("click",() => { if (cy) cy.fit(undefined,45); });
 $("export").addEventListener("click",() => {
