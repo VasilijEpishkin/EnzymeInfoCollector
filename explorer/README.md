@@ -69,7 +69,12 @@ node --test explorer/tests/model.test.mjs
 node --check explorer/app.mjs
 ~~~
 
-GitHub Actions executes the model tests under Node.js 22 separately from the
-existing Python 3.11/3.13 suite. Network access is not required for tests;
-the demo is deliberately synthetic. Browser smoke tests should additionally
-verify real graphs on desktop and mobile before closing issue #4.
+GitHub Actions executes the model tests under Node.js 22 separately from
+the existing Python 3.11/3.13 suite. The Node tests are network-free.
+An additional **headless Chrome UI smoke test** loads the synthetic demo and
+checks that all five nodes/four edges render in the browser. That smoke check
+downloads the pinned Cytoscape.js script from its CDN.
+
+Interactive desktop/mobile review with real user-selected JSON files and
+the currently unavailable taxon/EC-classification filters remain follow-ups
+before closing issue #4.
