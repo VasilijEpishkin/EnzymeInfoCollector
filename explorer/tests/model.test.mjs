@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  MAX_GRAPH_ELEMENTS, validateGraph, searchNodes, neighborhood, subgraph,
+  MAX_GRAPH_ELEMENTS, validateGraph, searchNodes, neighborhood, subgraph, discoveryNotices,
 } from "../model.mjs";
 
 const source = JSON.parse(readFileSync(new URL("../demo.json",import.meta.url),"utf8"));
@@ -146,4 +146,17 @@ test("HTML contains interactive taxonomy and EC controls and pins Cytoscape CDN 
     assert.ok(html.includes('id="'+id+'"'),"Missing UI element: "+id);
   }
   assert.match(html,/integrity="sha384-[A-Za-z0-9+/=]+"/);
+});
+
+test("discovery warnings show truncation and unknown direct Rhea status",() => {
+  const graph=valid();
+  graph.provenance.discovery={
+    selection:{truncated:true},
+    without_direct_rhea_annotation:["P00001"]
+  };
+  const notices=discoveryNotices(graph);
+  assert.equal(notices.length,2);
+  assert.match(notices[0],/усечены/);
+  assert.match(notices[1],/не отрицательный результат/);
+  assert.deepEqual(discoveryNotices(valid()),[]);
 });
