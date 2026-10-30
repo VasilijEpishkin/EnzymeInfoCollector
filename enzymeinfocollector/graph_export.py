@@ -101,20 +101,20 @@ def project_graph(reference: Mapping[str, Any], *, protein: str | None = None) -
     seen_proteins = set()
     pending_catalytic = []
     for item in _rows(reference.get("proteins"), "proteins"):
-        protein = _object(item, "protein")
-        accession = _identifier(protein.get("accession"), _UNIPROT, "UniProt accession")
+        protein_record = _object(item, "protein")
+        accession = _identifier(protein_record.get("accession"), _UNIPROT, "UniProt accession")
         if accession in seen_proteins:
             raise DataSourceError(f"Duplicate protein {accession}")
         seen_proteins.add(accession)
         add_node({
             "id": f"protein:{accession}", "node_type": "Protein",
             "label": accession, "accession": accession,
-            "reviewed": protein.get("reviewed"),
-            "entry_version": protein.get("entry_version"),
-            "sequence_version": protein.get("sequence_version"),
-            "source_release": protein.get("source_release"),
+            "reviewed": protein_record.get("reviewed"),
+            "entry_version": protein_record.get("entry_version"),
+            "sequence_version": protein_record.get("sequence_version"),
+            "source_release": protein_record.get("source_release"),
         })
-        for raw_assertion in _rows(protein.get("direct_assertions"), "direct_assertions"):
+        for raw_assertion in _rows(protein_record.get("direct_assertions"), "direct_assertions"):
             assertion = _object(raw_assertion, "direct assertion")
             reaction = _object(assertion.get("reaction"), "assertion reaction")
             master = _identifier(reaction.get("master_id"), _RHEA, "asserted Rhea master")
