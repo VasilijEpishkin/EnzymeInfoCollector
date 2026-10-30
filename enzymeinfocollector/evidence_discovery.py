@@ -10,6 +10,7 @@ from __future__ import annotations
 import csv
 import hashlib
 import io
+import json
 import re
 from typing import Any
 from urllib.parse import urlencode
@@ -17,7 +18,7 @@ from urllib.parse import urlencode
 from .evidence_sources import DirectEvidenceCollector
 from .graph_export import project_graph
 from .reference_dataset import (
-    _canonical_bytes, collect_reference_from_evidence,
+    _canonical_bytes, collect_reference_from_evidence, reference_json,
 )
 from .sources import (
     DataSourceError, ENZYME_URL, HttpCache, UNIPROT_ACCESSION,
@@ -213,5 +214,10 @@ def collect_discovered_graph(
     reference["provenance"]["discovery"] = info
     del reference["semantic_sha256"]
     reference["semantic_sha256"] = hashlib.sha256(_canonical_bytes(reference)).hexdigest()
-    graph = project_graph(reference)
-    return reference, graph
+    # Domain dataclass asdict preserves evidence tuples in memory; the
+    # published reference JSON represents them as arrays. Project the exact
+    # JSON round-trip instead of feeding un-serialized tuples into graph
+    # exporter, whose contract explicitly requires JSON lists.
+    reference_json_value = json.loads(reference_json(reference))
+    graph = project_graph(reference_json_value)
+    return reference_json_value, graph
