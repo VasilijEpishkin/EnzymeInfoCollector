@@ -236,6 +236,7 @@ function download(name,text) {
   document.body.append(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(href),1500);
 }
+$("choose-file").addEventListener("click",() => $("file-input").click());
 $("file-input").addEventListener("change",async (event) => {
   const file = event.target.files?.[0];
   if (!file) return;
