@@ -23,12 +23,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("input", type=Path, help="Verified JSON from reference_cli")
     parser.add_argument("--format", choices=("graphml", "cytoscape-json"),
                         default="cytoscape-json")
+    parser.add_argument("--protein", help="Limit graph to one UniProt accession neighborhood")
     parser.add_argument("-o", "--output", type=Path,
                         help="Output file; defaults to stdout")
     args = parser.parse_args(argv)
     try:
         document = json.loads(args.input.read_text(encoding="utf-8"))
-        graph = project_graph(document)
+        graph = project_graph(document, protein=args.protein)
         output = to_graphml(graph) if args.format == "graphml" else graph_json(graph)
         if args.output is not None:
             _atomic_write(args.output, output.encode("utf-8"))

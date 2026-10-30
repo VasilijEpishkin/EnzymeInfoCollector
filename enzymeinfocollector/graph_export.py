@@ -43,7 +43,7 @@ def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
 
 
-def project_graph(reference: Mapping[str, Any]) -> dict[str, Any]:
+def project_graph(reference: Mapping[str, Any], *, protein: str | None = None) -> dict[str, Any]:
     """Convert a verified reference result to typed nodes and directed edges.
 
     Contains only source-justified relationships: Protein CATALYZES Reaction
@@ -170,7 +170,7 @@ def project_graph(reference: Mapping[str, Any]) -> dict[str, Any]:
                 "coefficient": coefficient,
             })
 
-    return {
+    result = {
         "schema_version": GRAPH_SCHEMA,
         "semantics": {
             "catalysis": "direct UniProtKB annotation only, never EC join",
@@ -181,6 +181,36 @@ def project_graph(reference: Mapping[str, Any]) -> dict[str, Any]:
         "elements": {
             "nodes": [{"data": nodes[k]} for k in sorted(nodes)],
             "edges": [{"data": edges[k]} for k in sorted(edges)],
+        },
+    }
+    return select_protein_neighborhood(result, protein) if protein is not None else result
+
+
+def select_protein_neighborhood(graph: Mapping[str, Any], protein: str) -> dict[str, Any]:
+    """Select one UniProt protein, its annotated reactions and their compounds.
+
+    Filtering is by already-asserted edges; no new catalysis claims or EC
+    joins are introduced. Original source provenance remains attached.
+    """
+    accession = _identifier(protein, _UNIPROT, "UniProt accession")
+    root = "protein:" + accession
+    elements = _object(graph.get("elements"), "graph elements")
+    nodes = _rows(elements.get("nodes"), "nodes")
+    edges = _rows(elements.get("edges"), "edges")
+    if not any(_object(item.get("data"), "graph node").get("id") == root for item in nodes):
+        raise DataSourceError(f"Protein {accession} is absent from the graph result")
+    catalysis = [item for item in edges if item["data"].get("relation") == "CATALYZES"
+                 and item["data"].get("source") == root]
+    reaction_ids = {item["data"]["target"] for item in catalysis}
+    participants = [item for item in edges if item["data"].get("relation") == "HAS_PARTICIPANT"
+                    and item["data"].get("source") in reaction_ids]
+    active = {root} | reaction_ids | {item["data"]["target"] for item in participants}
+    return {
+        **graph,
+        "scope": {"protein": accession},
+        "elements": {
+            "nodes": [item for item in nodes if item["data"]["id"] in active],
+            "edges": [item for item in edges if item in catalysis or item in participants],
         },
     }
 
