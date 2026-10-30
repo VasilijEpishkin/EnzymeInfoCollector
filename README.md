@@ -150,6 +150,45 @@ master-реакций и 100 ChEBI ID. Реакции с неподдержив�
 
 [Контракт, ограничения и пример](docs/architecture/reference_dataset.md).
 
+## Единый поиск по EC / названию → доказательный граф (v2)
+
+Команда сразу получает **ограниченный** набор UniProt-кандидатов по EC или
+названию фермента из ExPASy, проверяет **прямые** каталитические связи
+UniProt↔Rhea и обогащает подтверждённые реакции через Rhea RDF и ChEBI.
+Готовый `network.json` открывается в [локальном Evidence Explorer](explorer/).
+
+~~~bash
+# Пример с небольшим числом кандидатов: каталаза человека
+python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \
+  --taxon-id 9606 --max-proteins 3 -o network.json
+
+# По названию: точное соответствие ExPASy ENZYME
+python -m enzymeinfocollector.discover_cli --enzyme Catalase \
+  --taxon-id 9606 -o network.json
+
+# Другие поддерживаемые форматы
+python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \
+  --taxon-id 9606 --format graphml -o network.graphml
+python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \
+  --taxon-id 9606 --format reference-json -o verified.json
+~~~
+
+По умолчанию выбираются максимум **3 reviewed-белка**; предел — 10.
+Для включения TrEMBL укажите `--include-unreviewed`. Таксон по умолчанию
+сравнивается **точно** (`--taxon-scope exact`); выбор
+`--taxon-scope descendants` включает потомков по поиску UniProt.
+Отбор белков по EC — только **поиск кандидатов**, а не доказательство
+катализа конкретной реакции. Отсутствие прямой Rhea-аннотации не означает
+отсутствия активности. Когда кандидатов больше ограничения, команда
+сообщает об усечении выборки и сохраняет этот факт вместе с provenance.
+
+**Важно:** поиск по названию с несколькими EC-классами завершится
+сообщением о неоднозначности: необходимо указать `--ec`. При отсутствии
+у выбранных белков прямых Rhea-аннотаций команда откажется создавать
+ложный граф. Старый CLI по названиям/EC и его форматы не изменены.
+
+[Подробный контракт и ограничения](docs/architecture/evidence_discovery.md).
+
 ## Графовый экспорт связей (v2, экспериментально)
 
 Проверенный JSON после сквозного запуска можно преобразовать в
