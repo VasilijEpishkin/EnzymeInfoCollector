@@ -1,14 +1,6 @@
 name: Optional live UniProt-Rhea-ChEBI smoke
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - feature/reference-dataset-builder
-    paths:
-      - enzymeinfocollector/rhea_participants.py
-      - enzymeinfocollector/reference_dataset.py
-      - enzymeinfocollector/reference_cli.py
-      - .github/workflows/live-integration.yml
 
 permissions:
   contents: read

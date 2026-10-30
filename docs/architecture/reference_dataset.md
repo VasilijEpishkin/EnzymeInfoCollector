@@ -65,9 +65,17 @@ contradictory reaction IDs, missing/truncated RDF responses, absence of
 ChEBI direct identity, unknown/empty associations, no EC join, source
 hashes, stable projection and atomic file writes.
 
-A separate manual live check is required before declaring the
-integration ready for broad enzyme classes. Live API response drift
-is not an offline CI failure.
+A live integration smoke test **was performed on 2026-10-30** via GitHub
+Actions run 41018862354 (Python 3.11). Using UniProt accession
+`P04040`, all three providers responded successfully: **1 protein,
+1 directly linked Rhea master reaction, and 3 ChEBI compounds**. The
+workflow verified the presence of direct catalytic assertions and actual
+Rhea sides/coefficients, with no missing master reactions; the API output
+was not committed or published. This establishes one full working path,
+not broad coverage of all enzymes. It can be repeated manually from
+`Optional live UniProt-Rhea-ChEBI smoke` in GitHub Actions.
+
+Offline unit CI stays network-free; live API drift is not its blocker.
 
 ## Next work
 
