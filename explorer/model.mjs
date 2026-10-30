@@ -117,7 +117,7 @@ export function neighborhood(graph, rootId, options = {}) {
       && (!ecNumber || (Array.isArray(data.ec_numbers) && data.ec_numbers.some(
         (assigned) => String(assigned).toLowerCase() === ecNumber)));
   };
-  assert(acceptedNode(rootId), "Выбранный белок не соответствует фильтрам reviewed / taxon / EC.");
+  assert(acceptedNode(rootId), "Выбранный белок не соответствует фильтрам Reviewed / taxon / EC.");
   const eligible = graph.elements.edges.filter(({ data }) => {
     if (data.relation === "CATALYZES" && !showCatalysis) return false;
     if (data.relation === "HAS_PARTICIPANT" && !showParticipants) return false;
