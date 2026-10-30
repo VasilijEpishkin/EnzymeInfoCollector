@@ -7,7 +7,8 @@ visualization. This reads only the existing v2 JSON produced by
 ## Semantics
 
 Nodes:
-- `Protein`: UniProt accession, reviewed status and entry/sequence version
+- `Protein`: UniProt accession, reviewed status, entry/sequence version,
+  optional UniProt taxon ID, organism name and EC classification
 - `Reaction`: master Rhea ID, equation and status
 - `Compound`: canonical ChEBI identity and its source release
 - `UnresolvedCompound`: an explicitly reported ChEBI ID whose canonical
@@ -50,10 +51,10 @@ Graph projection is network-free and uses only Python's standard library.
   deterministic output, and rejection of missing master/compound references.
 - The graph is a **projection** of verified data, not an independent source
   of assertions. Do not treat graph topology as experimental evidence.
-- No EC classification nodes or pathway relationships are inferred yet;
-  those are future typed relationships with distinct semantics.
-- No Cytoscape.js application is included in this PR; browser UI is planned
-  separately.
+- EC numbers and taxonomy are protein **metadata**, not independent
+  evidence edges. No EC nodes or pathway links are invented in the graph.
+- The local Cytoscape.js explorer in `explorer/` accepts this JSON and
+  supports exact taxonomy/EC filters (when those attributes are present).
 - No mass-balance or atom-mapping chemistry validation is claimed.
 
 ## Optional protein neighborhood filter

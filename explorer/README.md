@@ -52,10 +52,13 @@ product distinction.
 - Only current \`2.0-graph-preview\` Cytoscape JSON is supported. The
   explorer rejects malformed schemas, missing graph endpoints, unsupported
   relationship types and overlarge inputs (8 MB file, 16,000 elements).
-- No taxon filter or full EC-classification search yet: the current graph
-  exporter does not supply taxonomy or EC-classification nodes. An
-  \`ec_numbers\` value can be searched if it exists on a node, but
-  the viewer does not invent it.
+- Exact UniProt taxonomy ID and EC-classification filters are available on
+  protein nodes when source records contain those attributes. Missing values
+  are unknown, not negative observations. Taxonomy matches are exact, **not**
+  a search of taxonomic descendants.
+- EC classification does not imply direct catalytic evidence. Searching EC
+  highlights only proteins actually present in the selected local graph;
+  it never creates new Protein–Reaction edges or queries external databases.
 - No streaming large graphs or database integration; use the Python
   exporters to scope the data at source.
 - The diagram itself is mouse/touch oriented; the search list, filters,
@@ -78,3 +81,10 @@ downloads the pinned Cytoscape.js script from its CDN.
 Interactive desktop/mobile review with real user-selected JSON files and
 the currently unavailable taxon/EC-classification filters remain follow-ups
 before closing issue #4.
+
+**Privacy note:** the user's JSON is read in the page via the local File
+API; the application itself does not upload it. Cytoscape.js is loaded from
+a version-pinned CDN with SHA-384 subresource integrity (SRI) checked by the
+browser, mitigating CDN content tampering. For air-gapped workflows serve a
+locally licensed copy of the same library. The CDN may still receive the
+browser's network request for that library, but not the selected JSON.

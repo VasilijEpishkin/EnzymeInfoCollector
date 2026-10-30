@@ -103,11 +103,21 @@ export function neighborhood(graph, rootId, options = {}) {
   const showParticipants = options.showParticipants !== false;
   const reviewedOnly = options.reviewedOnly === true;
   const ecoFilter = String(options.eco || "").trim().toUpperCase();
+  const taxonId = String(options.taxonId ?? "").trim();
+  const ecNumber = String(options.ecNumber || "").trim().toLowerCase().replace(/^ec[ :]+/, "");
+  assert(!taxonId || /^[1-9][0-9]*$/.test(taxonId), "Taxon ID должен быть положительным числом.");
+  assert(!ecNumber || /^[1-7]\.(?:[0-9]+|-|n[0-9]+)\.(?:[0-9]+|-|n[0-9]+)\.(?:[0-9]+|-|n[0-9]+)$/i.test(ecNumber),
+    "Введите EC в формате 1.11.1.6.");
   const acceptedNode = (nodeId) => {
     const data = byId.get(nodeId)?.data;
-    return data && (!reviewedOnly || data.node_type !== "Protein" || data.reviewed === true);
+    if (!data) return false;
+    if (data.node_type !== "Protein") return true;
+    return (!reviewedOnly || data.reviewed === true)
+      && (!taxonId || String(data.taxon_id ?? "") === taxonId)
+      && (!ecNumber || (Array.isArray(data.ec_numbers) && data.ec_numbers.some(
+        (assigned) => String(assigned).toLowerCase() === ecNumber)));
   };
-  assert(acceptedNode(rootId), "Для выбранного белка включён фильтр Reviewed.");
+  assert(acceptedNode(rootId), "Выбранный белок не соответствует фильтрам reviewed / taxon / EC.");
   const eligible = graph.elements.edges.filter(({ data }) => {
     if (data.relation === "CATALYZES" && !showCatalysis) return false;
     if (data.relation === "HAS_PARTICIPANT" && !showParticipants) return false;
@@ -152,7 +162,8 @@ export function neighborhood(graph, rootId, options = {}) {
     rootId,
     depth,
     truncated,
-    options: { showCatalysis, showParticipants, reviewedOnly, eco: ecoFilter },
+    options: { showCatalysis, showParticipants, reviewedOnly, eco: ecoFilter,
+      taxonId, ecNumber },
   };
 }
 

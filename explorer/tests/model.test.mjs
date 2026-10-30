@@ -95,3 +95,36 @@ test("rejects unsupported schema, invalid IDs and unbounded graphs",() => {
   large.elements.edges=[];
   assert.throws(()=>validateGraph(large),/слишком велик/);
 });
+
+test("EC classification and exact taxonomy filters match only annotated proteins",() => {
+  const graph=valid();
+  assert.equal(searchNodes(graph,"1.11.1.6")[0].data.id,"protein:P00001");
+  assert.equal(neighborhood(graph,"protein:P00001",
+    {taxonId:"9606",ecNumber:"1.11.1.6"}).edges.length,4);
+  assert.equal(neighborhood(graph,"protein:P00001",
+    {taxonId:"9606",ecNumber:"EC 1.11.1.6"}).edges.length,4);
+  assert.throws(() => neighborhood(graph,"protein:P00001",
+    {taxonId:"10090"}),/фильтрам/);
+  assert.throws(() => neighborhood(graph,"protein:P00001",
+    {ecNumber:"2.7.1.1"}),/фильтрам/);
+  assert.throws(() => neighborhood(graph,"protein:P00001",
+    {taxonId:"0"}),/положительным/);
+  assert.throws(() => neighborhood(graph,"protein:P00001",
+    {ecNumber:"1.1.1;DROP"}),/формате/);
+  // A taxon filter must not quietly introduce missing evidence links.
+  const scoped=neighborhood(graph,"reaction:RHEA:10000",
+    {taxonId:"10090"});
+  assert.ok(scoped.nodes.every(({data}) => data.node_type !== "Protein"));
+  assert.ok(scoped.edges.every(({data}) => data.relation !== "CATALYZES"));
+});
+test("legacy graphs without taxonomy/EC are still readable and marked unknown",() => {
+  const legacy=structuredClone(source);
+  for (const node of legacy.elements.nodes) {
+    delete node.data.taxon_id;
+    delete node.data.ec_numbers;
+  }
+  const graph=validateGraph(legacy);
+  assert.equal(neighborhood(graph,"protein:P00001").edges.length,4);
+  assert.throws(() => neighborhood(graph,"protein:P00001",
+    {taxonId:"9606",ecNumber:"1.11.1.6"}),/фильтрам/);
+});

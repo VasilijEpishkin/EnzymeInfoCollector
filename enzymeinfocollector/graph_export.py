@@ -112,6 +112,9 @@ def project_graph(reference: Mapping[str, Any], *, protein: str | None = None) -
             "reviewed": protein_record.get("reviewed"),
             "entry_version": protein_record.get("entry_version"),
             "sequence_version": protein_record.get("sequence_version"),
+            "taxon_id": protein_record.get("taxon_id"),
+            "organism_name": protein_record.get("organism_name"),
+            "ec_numbers": protein_record.get("ec_numbers", []),
             "source_release": protein_record.get("source_release"),
         })
         for raw_assertion in _rows(protein_record.get("direct_assertions"), "direct_assertions"):
