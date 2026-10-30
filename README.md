@@ -150,6 +150,26 @@ master-реакций и 100 ChEBI ID. Реакции с неподдержив�
 
 [Контракт, ограничения и пример](docs/architecture/reference_dataset.md).
 
+## Графовый экспорт связей (v2, экспериментально)
+
+Проверенный JSON после сквозного запуска можно преобразовать в
+**GraphML** (совместимый с Cytoscape/Gephi) или **Cytoscape JSON**:
+
+~~~bash
+python -m enzymeinfocollector.reference_cli --accession P04040 -o integrated.json
+python -m enzymeinfocollector.graph_cli integrated.json --format graphml -o network.graphml
+python -m enzymeinfocollector.graph_cli integrated.json --format cytoscape-json -o network.json
+~~~
+
+Рёбра `CATALYZES` создаются **только из прямых UniProt-аннотаций**;
+в них сохраняются Rhea direction, ECO, публикации и источник.
+Рёбра `HAS_PARTICIPANT` используют стороны и коэффициенты Rhea RDF;
+неразрешённые ChEBI ID остаются видимыми отдельными узлами.
+Совпадение EC не создаёт связи катализа. Экспорт не требует сети или
+дополнительной СУБД и не меняет прежний CLI.
+
+[Контракт графа](docs/architecture/graph_export.md).
+
 ## Источники и разработка
 
 - [ExPASy ENZYME](https://enzyme.expasy.org/) — номенклатура и номера EC.
