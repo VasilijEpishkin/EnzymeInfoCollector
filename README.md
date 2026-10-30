@@ -170,6 +170,25 @@ python -m enzymeinfocollector.graph_cli integrated.json --format cytoscape-json 
 
 [Контракт графа](docs/architecture/graph_export.md).
 
+## Локальный интерактивный граф
+
+Минимальный **Cytoscape.js Evidence Explorer** доступен в [explorer/](explorer/).
+Он открывает JSON из \`graph_cli\` без отправки файлов на сервер и позволяет
+искать UniProt/Rhea/ChEBI, просматривать ограниченный подграф, ECO,
+публикации, направления и стехиометрию, фильтровать связи и экспортировать
+видимую область. Граф не создаёт новых биологических утверждений.
+
+~~~bash
+python -m http.server 8000 --bind 127.0.0.1
+# Открыть http://127.0.0.1:8000/explorer/
+~~~
+
+В браузере выберите файл \`network.json\` после экспорта
+\`python -m enzymeinfocollector.graph_cli integrated.json --format cytoscape-json -o network.json\`.
+Кнопка «Демо» содержит **синтетические**, не научные данные. Для визуализации
+Cytoscape.js подгружается с CDN; сама обработка графа локальная.
+[Инструкция и ограничения](explorer/README.md).
+
 ## Источники и разработка
 
 - [ExPASy ENZYME](https://enzyme.expasy.org/) — номенклатура и номера EC.
