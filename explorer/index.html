@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>EnzymeInfoCollector — Evidence Explorer</title>
+  <meta name="description" content="Локальный просмотр прямых связей UniProt, Rhea и ChEBI с доказательствами.">
+  <link rel="stylesheet" href="./styles.css">
+  <script defer src="https://cdn.jsdelivr.net/npm/cytoscape@3.34.4/dist/cytoscape.min.js"></script>
+  <script type="module" src="./app.mjs"></script>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">E</div>
+        <div>
+          <div class="overline">EnzymeInfoCollector / v2</div>
+          <h1>Evidence explorer</h1>
+          <p>Просмотр проверяемых связей белок — реакция — соединение</p>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="choose-file" class="action primary" type="button">Открыть граф JSON</button>
+        <input id="file-input" type="file" accept=".json,application/json" tabindex="-1" aria-hidden="true">
+        <button id="demo" class="action secondary" type="button">Демо</button>
+        <a class="repo-link" href="https://github.com/VasilijEpishkin/EnzymeInfoCollector" target="_blank" rel="noopener noreferrer">Репозиторий <span aria-hidden="true">↗</span></a>
+      </div>
+    </header>
+
+    <div class="dataset-strip" role="status" aria-live="polite">
+      <span id="dataset-name">Нет загруженного графа</span>
+      <span id="load-status">Загрузите Cytoscape JSON из <code>graph_cli</code> или откройте демо.</span>
+    </div>
+
+    <main class="workspace">
+      <aside class="sidebar" aria-label="Поиск и фильтры">
+        <section class="section">
+          <div class="section-heading"><h2>Поиск</h2><span class="micro">01</span></div>
+          <label for="search">UniProt · Rhea · ChEBI</label>
+          <input id="search" type="search" placeholder="P04040, RHEA:20309, CHEBI..." autocomplete="off" disabled>
+          <p class="hint">Поиск по узлам и направленным Rhea ID. Отображаются ближайшие связи.</p>
+          <div id="results-count" class="result-count" aria-live="polite">Нет данных</div>
+          <div id="search-results" class="result-list" role="list" aria-label="Результаты поиска"></div>
+        </section>
+        <section class="section filters">
+          <div class="section-heading"><h2>Фильтры</h2><span class="micro">02</span></div>
+          <div class="setting-line">
+            <label for="depth">Радиус связей</label>
+            <select id="depth" disabled><option value="1">1 переход</option><option value="2" selected>2 перехода</option></select>
+          </div>
+          <div class="setting-line">
+            <label for="node-limit">Узлов на экране</label>
+            <select id="node-limit" disabled><option value="30">30</option><option value="80" selected>80</option><option value="120">120</option></select>
+          </div>
+          <fieldset class="check-group">
+            <legend>Отображать</legend>
+            <label><input id="filter-catalysis" type="checkbox" checked disabled> Каталитические связи</label>
+            <label><input id="filter-participants" type="checkbox" checked disabled> Участников реакций</label>
+            <label><input id="filter-reviewed" type="checkbox" disabled> Только reviewed белки</label>
+          </fieldset>
+          <label for="eco">ECO-код для каталитических связей</label>
+          <input id="eco" type="search" placeholder="Например, ECO:0000269" disabled>
+          <p class="hint">Если код указан, неподходящие каталитические связи скрываются. Отсутствие ECO — не отрицательное доказательство.</p>
+          <p class="hint">Фильтр по таксону появится после добавления таксона в формат экспорта.</p>
+        </section>
+      </aside>
+
+      <section class="canvas-panel" aria-label="Интерактивный граф">
+        <div class="canvas-top">
+          <div>
+            <div class="eyebrow">RELATIONSHIP VIEW</div>
+            <h2 id="focus-title">Выберите узел</h2>
+          </div>
+          <div class="canvas-actions">
+            <button id="fit" class="small-button" type="button" disabled>Вписать</button>
+            <button id="export" class="small-button strong-button" type="button" disabled>Экспорт подграфа</button>
+          </div>
+        </div>
+        <div class="graph-holder">
+          <div id="graph" aria-label="Интерактивная схема связей" role="application"></div>
+          <div id="empty-state" class="empty">
+            <div class="empty-graphic" aria-hidden="true"><span></span><span></span><span></span></div>
+            <h3>Готов к исследованию</h3>
+            <p>Откройте JSON из экспортера или демонстрационный граф. Файл обрабатывается локально в браузере.</p>
+          </div>
+        </div>
+        <div class="canvas-bottom">
+          <div class="legend" aria-label="Условные обозначения">
+            <span><i class="dot protein"></i> Белок</span>
+            <span><i class="dot reaction"></i> Реакция</span>
+            <span><i class="dot compound"></i> Соединение</span>
+            <span><i class="dot unresolved"></i> Неизвестная запись</span>
+          </div>
+          <span id="graph-count" aria-live="polite">0 узлов · 0 связей</span>
+        </div>
+      </section>
+
+      <aside class="inspector" aria-label="Детали выбранной записи">
+        <div class="section-heading"><h2>Карточка данных</h2><span class="micro">03</span></div>
+        <div id="inspector-content" class="inspector-content">
+          <p class="placeholder">Выберите узел или ребро графа для просмотра источников, доказательств и идентификаторов.</p>
+        </div>
+      </aside>
+    </main>
+    <footer class="footer">
+      <span>Связь CATALYZES = прямая аннотация UniProt. Совпадение EC само по себе не доказывает катализ.</span>
+      <span>Левая и правая стороны Rhea не всегда означают физиологические субстраты и продукты.</span>
+    </footer>
+  </div>
+</body>
+</html>

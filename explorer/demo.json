@@ -1,0 +1,144 @@
+{
+  "schema_version": "2.0-graph-preview",
+  "semantics": {
+    "catalysis": "SYNTHETIC DEMO ONLY — NOT biological evidence",
+    "sides": "left/right are Rhea equation sides",
+    "unknown_is_not_negative": true
+  },
+  "provenance": {
+    "dataset_type": "synthetic-demo",
+    "attribution": "Synthetic UI fixture, not a scientific observation",
+    "uniprot_release": "synthetic"
+  },
+  "elements": {
+    "nodes": [
+      {
+        "data": {
+          "id": "protein:P00001",
+          "node_type": "Protein",
+          "label": "P00001 (демо)",
+          "accession": "P00001",
+          "reviewed": true,
+          "entry_version": 1,
+          "sequence_version": 1,
+          "source_release": {
+            "database": "Synthetic",
+            "release": "demo-only"
+          }
+        }
+      },
+      {
+        "data": {
+          "id": "reaction:RHEA:10000",
+          "node_type": "Reaction",
+          "label": "RHEA:10000",
+          "rhea_master_id": "RHEA:10000",
+          "equation": "A + B = C",
+          "status": "synthetic"
+        }
+      },
+      {
+        "data": {
+          "id": "compound:CHEBI:15377",
+          "node_type": "Compound",
+          "label": "Вода (демо)",
+          "chebi_id": "CHEBI:15377",
+          "formula": "H2O",
+          "charge": 0,
+          "source_release": {
+            "database": "Synthetic",
+            "release": "demo-only"
+          }
+        }
+      },
+      {
+        "data": {
+          "id": "compound:CHEBI:16240",
+          "node_type": "Compound",
+          "label": "Соединение A (демо)",
+          "chebi_id": "CHEBI:16240",
+          "formula": null,
+          "charge": null,
+          "source_release": {
+            "database": "Synthetic",
+            "release": "demo-only"
+          }
+        }
+      },
+      {
+        "data": {
+          "id": "compound:CHEBI:99999",
+          "node_type": "UnresolvedCompound",
+          "label": "CHEBI:99999",
+          "chebi_id": "CHEBI:99999",
+          "formula": null,
+          "charge": null,
+          "source_release": null
+        }
+      }
+    ],
+    "edges": [
+      {
+        "data": {
+          "id": "catalysis:P00001:RHEA:10001",
+          "source": "protein:P00001",
+          "target": "reaction:RHEA:10000",
+          "relation": "CATALYZES",
+          "rhea_directional_id": "RHEA:10001",
+          "direction": "left_to_right",
+          "evidence": [
+            {
+              "source_database": "Synthetic",
+              "eco_code": "ECO:0000305",
+              "citation_ids": []
+            }
+          ],
+          "source_release": {
+            "database": "Synthetic",
+            "release": "demo-only"
+          },
+          "annotation_id": "synthetic:demo:0"
+        }
+      },
+      {
+        "data": {
+          "id": "participant:RHEA:10000:0:CHEBI:15377",
+          "source": "reaction:RHEA:10000",
+          "target": "compound:CHEBI:15377",
+          "relation": "HAS_PARTICIPANT",
+          "reported_chebi_id": "CHEBI:15377",
+          "primary_chebi_id": "CHEBI:15377",
+          "side": "right",
+          "coefficient": "2",
+          "resolution_status": "resolved"
+        }
+      },
+      {
+        "data": {
+          "id": "participant:RHEA:10000:1:CHEBI:16240",
+          "source": "reaction:RHEA:10000",
+          "target": "compound:CHEBI:16240",
+          "relation": "HAS_PARTICIPANT",
+          "reported_chebi_id": "CHEBI:16240",
+          "primary_chebi_id": "CHEBI:16240",
+          "side": "left",
+          "coefficient": "1",
+          "resolution_status": "resolved"
+        }
+      },
+      {
+        "data": {
+          "id": "participant:RHEA:10000:2:CHEBI:99999",
+          "source": "reaction:RHEA:10000",
+          "target": "compound:CHEBI:99999",
+          "relation": "HAS_PARTICIPANT",
+          "reported_chebi_id": "CHEBI:99999",
+          "primary_chebi_id": null,
+          "side": null,
+          "coefficient": null,
+          "resolution_status": "unresolved"
+        }
+      }
+    ]
+  }
+}
