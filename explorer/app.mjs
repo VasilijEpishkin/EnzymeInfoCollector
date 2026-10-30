@@ -1,4 +1,4 @@
-import { MAX_FILE_BYTES, validateGraph, searchNodes, neighborhood, subgraph } from "./model.mjs";
+import { MAX_FILE_BYTES, validateGraph, searchNodes, neighborhood, subgraph, discoveryNotices } from "./model.mjs";
 
 const $ = (id) => document.getElementById(id);
 const controls = ["search","depth","node-limit","filter-catalysis","filter-participants",
@@ -209,7 +209,8 @@ function render() {
     $("focus-title").textContent = rootId;
     $("graph-count").textContent = "Узлов: " + visible.nodes.length + " · связей: " + visible.edges.length;
     status(graph.elements.nodes.length + " узлов в файле · показано " + visible.nodes.length +
-      (visible.truncated ? " · область ограничена" : ""));
+      (visible.truncated ? " · область ограничена" : "") +
+      (discoveryNotices(graph).length ? " · " + discoveryNotices(graph).join(" · ") : ""));
     if (selectedId && viewer.getElementById(selectedId).nonempty()) selectElement(selectedId);
     else selectElement(rootId);
     searchResults();
@@ -233,8 +234,12 @@ async function load(data,name,isDemo) {
   $("depth").value = "2"; $("node-limit").value = "80";
   $("filter-catalysis").checked = true; $("filter-participants").checked = true;
   $("filter-reviewed").checked = false;
-  rootId = graph.elements.nodes.find((n) => n.data.node_type === "Protein")?.data.id ||
-           graph.elements.nodes[0]?.data.id || null;
+  const directlyLinked = new Set(graph.elements.edges
+    .filter((edge) => edge.data.relation === "CATALYZES").map((edge) => edge.data.source));
+  rootId = graph.elements.nodes.find((n) =>
+    n.data.node_type === "Protein" && directlyLinked.has(n.data.id))?.data.id ||
+    graph.elements.nodes.find((n) => n.data.node_type === "Protein")?.data.id ||
+    graph.elements.nodes[0]?.data.id || null;
   selectedId = rootId;
   for (const id of controls) $(id).disabled = !rootId;
   if (rootId) render();

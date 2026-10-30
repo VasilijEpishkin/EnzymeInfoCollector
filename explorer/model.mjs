@@ -189,3 +189,17 @@ export function subgraph(graph, view) {
     elements: { nodes: view.nodes, edges: view.edges },
   };
 }
+
+/** Render source-reported discovery limitations, never activity negatives. */
+export function discoveryNotices(graph) {
+  const info = graph?.provenance?.discovery;
+  if (!info || typeof info !== "object") return [];
+  const notices = [];
+  if (info.selection?.truncated === true)
+    notices.push("UniProt-кандидаты усечены лимитом поиска");
+  const unlinked = info.without_direct_rhea_annotation;
+  if (Array.isArray(unlinked) && unlinked.length)
+    notices.push("Без прямой Rhea-аннотации: " + unlinked.join(", ") +
+      " (не отрицательный результат)");
+  return notices;
+}
