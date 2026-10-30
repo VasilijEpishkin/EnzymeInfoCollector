@@ -24,3 +24,5 @@ jobs:
         run: node --check explorer/model.mjs && node --check explorer/app.mjs
       - name: Offline model tests
         run: node --test explorer/tests/model.test.mjs
+      - name: Headless Chrome UI smoke (synthetic demo)
+        run: python3 explorer/tests/smoke_browser.py

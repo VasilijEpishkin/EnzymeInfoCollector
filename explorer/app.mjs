@@ -201,7 +201,7 @@ function render() {
       nodeRepulsion:() => 450000,idealEdgeLength:() => 95}).run();
     $("empty-state").hidden = true;
     $("focus-title").textContent = rootId;
-    $("graph-count").textContent = visible.nodes.length + " узлов · " + visible.edges.length + " связей";
+    $("graph-count").textContent = "Узлов: " + visible.nodes.length + " · связей: " + visible.edges.length;
     status(graph.elements.nodes.length + " узлов в файле · показано " + visible.nodes.length +
       (visible.truncated ? " · область ограничена" : ""));
     if (selectedId && viewer.getElementById(selectedId).nonempty()) selectElement(selectedId);
