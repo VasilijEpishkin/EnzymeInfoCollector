@@ -150,6 +150,25 @@ master-реакций и 100 ChEBI ID. Реакции с неподдержив�
 
 [Контракт, ограничения и пример](docs/architecture/reference_dataset.md).
 
+## Графовый экспорт (экспериментально)
+
+Вместо собственной графовой БД инструмент строит GraphML и Cytoscape JSON
+из нормализованного результата сквозного запроса:
+
+~~~bash
+python -m enzymeinfocollector.reference_cli --accession P04040 -o integrated.json
+python -m enzymeinfocollector.graph_cli --input integrated.json --format graphml -o graph.graphml
+python -m enzymeinfocollector.graph_cli --input integrated.json --format cytoscape-json --protein P04040 -o graph.json
+~~~
+
+Связи `ANNOTATED_CATALYSIS` создаются **только из прямых аннотаций**
+UniProt; реакционные формы и соединения представлены отдельными
+типизированными узлами. ECO, публикации, направление, стороны и
+коэффициенты реакции доступны в атрибутах рёбер. Экспорт не требует Neo4j
+или других зависимостей и не изменяет существующий CLI.
+
+[Формат, ограничения и проверки](docs/architecture/graph_export.md).
+
 ## Источники и разработка
 
 - [ExPASy ENZYME](https://enzyme.expasy.org/) — номенклатура и номера EC.

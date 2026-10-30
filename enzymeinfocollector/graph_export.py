@@ -223,7 +223,7 @@ def graphml(graph: Mapping[str, Any]) -> str:
         fields = sorted({field for record in records for field in record
                          if field not in ("id", "source", "target")})
         for field in fields:
-            key = f"{target[0]}{len(attribute_keys)}"
+            key = f"attr_{target}_{len(attribute_keys)}"
             attribute_keys[(target, field)] = key
             ET.SubElement(root, "{" + GRAPHML_NS + "}key", {
                 "id": key, "for": target,
