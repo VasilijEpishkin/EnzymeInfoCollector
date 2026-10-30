@@ -295,6 +295,20 @@ def collect_live_reference(
     master reactions; ChEBI adapter independently caps its requests at 100.
     """
     evidence = DirectEvidenceCollector(cache).collect(accessions, refresh=refresh)
+    return collect_reference_from_evidence(evidence, cache, refresh=refresh)
+
+
+def collect_reference_from_evidence(
+    evidence: DirectEvidenceDataset,
+    cache: HttpCache,
+    *,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """Reuse already fetched UniProt assertions for an EC/name discovery.
+
+    This does not derive Rhea master IDs from the EC classification. Proteins
+    with no direct Rhea link remain visible in the reference result.
+    """
     master_ids = {
         assertion.reaction.master_id
         for protein in evidence.proteins
