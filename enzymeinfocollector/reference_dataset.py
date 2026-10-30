@@ -12,9 +12,11 @@ import hashlib
 import json
 from typing import Any, Iterable, Mapping
 
-from .compound_sources import ChEBICollection, normalize_chebi_id
+from .compound_sources import ChEBICollection, ChEBICollector, normalize_chebi_id
 from .domain import SourceRelease
-from .evidence_sources import DirectEvidenceDataset
+from .evidence_sources import DirectEvidenceCollector, DirectEvidenceDataset
+from .rhea_participants import RheaParticipantSnapshot, fetch_rhea_participants
+from .sources import HttpCache
 from .sources import DataSourceError
 
 
@@ -201,3 +203,107 @@ def build_reference_dataset(
 def reference_json(dataset: Mapping[str, Any]) -> str:
     """Stable UTF-8 JSON for archived snapshots, including trailing newline."""
     return json.dumps(dataset, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+
+
+def build_verified_reference_dataset(
+    evidence: DirectEvidenceDataset,
+    reactions: RheaParticipantSnapshot,
+    compounds: ChEBICollection,
+) -> dict[str, Any]:
+    """Build a Protein–Reaction–Compound result with verified RDF sides.
+
+    The existing flat-list builder is intentionally left intact for
+    backwards-compatible tests. This function uses only authoritative
+    Rhea RDF rh:side, rh:contains and rh:coefficient information.
+    """
+    required = {
+        assertion.reaction.master_id
+        for protein in evidence.proteins
+        for assertion in protein.assertions
+    }
+    available = {reaction.master_id for reaction in reactions.reactions}
+    if not required:
+        raise ValueError("No directly annotated Rhea reactions to inspect")
+    if available != required or len(available) != len(reactions.reactions):
+        raise DataSourceError(
+            f"Rhea participant coverage mismatch: missing={sorted(required - available)}, "
+            f"unexpected={sorted(available - required)}"
+        )
+
+    inputs = []
+    for reaction in reactions.reactions:
+        inputs.append({
+            "rhea_id": reaction.master_id,
+            "equation": reaction.equation,
+            "chebi_ids": sorted(
+                {participant.chebi_id for participant in reaction.participants},
+                key=_num_key,
+            ),
+        })
+    result = build_reference_dataset(
+        evidence, inputs, compounds, rhea_source=reactions.source_release
+    )
+    resolution = {
+        record.requested_id: record.primary_id
+        for record in compounds.resolutions
+    }
+    by_master = {reaction.master_id: reaction for reaction in reactions.reactions}
+    for row in result["reactions"]:
+        reaction = by_master[row["master_id"]]
+        row["compound_membership"] = [
+            {
+                "reported_chebi_id": member.chebi_id,
+                "primary_chebi_id": resolution.get(member.chebi_id),
+                "resolution_status": "resolved" if member.chebi_id in resolution else "unresolved",
+                "side": member.side.value,
+                "coefficient": format(member.coefficient, "f"),
+            }
+            for member in sorted(
+                reaction.participants,
+                key=lambda item: (
+                    item.side.value,
+                    _num_key(item.chebi_id),
+                    item.coefficient,
+                ),
+            )
+        ]
+    result["semantics"]["compound_membership"] = (
+        "Rhea RDF authoritative left/right equation sides and stoichiometry; "
+        "not automatically physiological substrate/product roles"
+    )
+    result["provenance"]["rhea_participant_queries"] = [
+        asdict(query) for query in reactions.query_snapshots
+    ]
+    del result["semantic_sha256"]
+    result["semantic_sha256"] = hashlib.sha256(_canonical_bytes(result)).hexdigest()
+    return result
+
+
+def collect_live_reference(
+    accessions: Iterable[str],
+    cache: HttpCache,
+    *,
+    refresh: bool = False,
+) -> dict[str, Any]:
+    """End-to-end, opt-in live check; does not modify the v1 CLI.
+
+    Direct UniProt links select which Rhea masters to fetch. Thus no EC
+    cross-product can create a Protein–Reaction relation. Maximum 25 Rhea
+    master reactions; ChEBI adapter independently caps its requests at 100.
+    """
+    evidence = DirectEvidenceCollector(cache).collect(accessions, refresh=refresh)
+    master_ids = {
+        assertion.reaction.master_id
+        for protein in evidence.proteins
+        for assertion in protein.assertions
+    }
+    if not master_ids:
+        raise DataSourceError("No directly annotated Rhea reactions; cannot build reference")
+    rdf = fetch_rhea_participants(master_ids, cache, refresh=refresh)
+    chebi_ids = {
+        participant.chebi_id
+        for reaction in rdf.reactions
+        for participant in reaction.participants
+    }
+    compounds = ChEBICollector(cache).collect(chebi_ids, refresh=refresh)
+    return build_verified_reference_dataset(evidence, rdf, compounds)

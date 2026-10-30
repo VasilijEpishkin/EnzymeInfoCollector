@@ -157,5 +157,73 @@ class ReferenceDatasetTests(unittest.TestCase):
         self.assertEqual(len(data["semantic_sha256"]), 64)
 
 
+    def test_rhea_rdf_participant_projection_preserves_both_sides_and_coefficients(self):
+        from decimal import Decimal
+        from enzymeinfocollector.domain import ReactionParticipant, ReactionSide
+        from enzymeinfocollector.rhea_participants import RheaReaction, RheaParticipantSnapshot
+        from enzymeinfocollector.reference_dataset import build_verified_reference_dataset
+        evidence, _, compounds = sample()
+        snapshot = RheaParticipantSnapshot(
+            reactions=(RheaReaction(
+                "RHEA:10000", "synthetic balanced equation", (
+                    ReactionParticipant("RHEA:10000", "CHEBI:5585", ReactionSide.LEFT, Decimal("2")),
+                    ReactionParticipant("RHEA:10000", "CHEBI:5585", ReactionSide.RIGHT, Decimal("1")),
+                    ReactionParticipant("RHEA:10000", "CHEBI:99999", ReactionSide.RIGHT, Decimal("3.5")),
+                ),
+            ),),
+            source_release=RHEA_RELEASE,
+            query_snapshots=(RHEA_RELEASE,),
+        )
+        result = build_verified_reference_dataset(evidence, snapshot, compounds)
+        memberships = result["reactions"][0]["compound_membership"]
+        self.assertEqual(
+            [(p["reported_chebi_id"], p["side"], p["coefficient"]) for p in memberships],
+            [("CHEBI:5585", "left", "2"), ("CHEBI:5585", "right", "1"),
+             ("CHEBI:99999", "right", "3.5")],
+        )
+        self.assertEqual(result["unresolved"]["unresolved_chebi_ids"], ["CHEBI:99999"])
+        self.assertEqual(result["proteins"][1]["direct_assertions"], [])
+        self.assertIn("rhea_participant_queries", result["provenance"])
+        self.assertIn("Rhea RDF authoritative", result["semantics"]["compound_membership"])
+        self.assertEqual(len(result["semantic_sha256"]), 64)
+
+    def test_rhea_rdf_masters_must_match_direct_evidence_masters(self):
+        from enzymeinfocollector.rhea_participants import RheaParticipantSnapshot
+        from enzymeinfocollector.reference_dataset import build_verified_reference_dataset
+        evidence, _, compounds = sample()
+        snapshot = RheaParticipantSnapshot((), RHEA_RELEASE, ())
+        with self.assertRaisesRegex(DataSourceError, "coverage mismatch"):
+            build_verified_reference_dataset(evidence, snapshot, compounds)
+
+    def test_end_to_end_pipeline_fetches_only_direct_rhea_ids(self):
+        from decimal import Decimal
+        from unittest.mock import patch
+        from enzymeinfocollector.domain import ReactionParticipant, ReactionSide
+        from enzymeinfocollector.rhea_participants import RheaReaction, RheaParticipantSnapshot
+        from enzymeinfocollector.reference_dataset import collect_live_reference
+        evidence, _, compounds = sample()
+        reaction = RheaReaction(
+            "RHEA:10000", "synthetic equation", (
+                ReactionParticipant("RHEA:10000", "CHEBI:5585", ReactionSide.LEFT, Decimal(1)),
+                ReactionParticipant("RHEA:10000", "CHEBI:5585", ReactionSide.RIGHT, Decimal(2)),
+            ),
+        )
+        snapshot = RheaParticipantSnapshot((reaction,), RHEA_RELEASE, (RHEA_RELEASE,))
+        with patch("enzymeinfocollector.reference_dataset.DirectEvidenceCollector") as direct, \
+             patch("enzymeinfocollector.reference_dataset.fetch_rhea_participants") as rhea, \
+             patch("enzymeinfocollector.reference_dataset.ChEBICollector") as chebi:
+            direct.return_value.collect.return_value = evidence
+            rhea.return_value = snapshot
+            chebi.return_value.collect.return_value = compounds
+            data = collect_live_reference(["P00001"], cache=None)
+        direct.return_value.collect.assert_called_once()
+        rhea.assert_called_once()
+        self.assertEqual(rhea.call_args.args[0], {"RHEA:10000"})
+        self.assertEqual(chebi.return_value.collect.call_args.args[0], {"CHEBI:5585"})
+        self.assertEqual(len(data["proteins"][0]["direct_assertions"]), 1)
+        self.assertFalse(any(p["accession"] == "P00002" and p["direct_assertions"]
+                             for p in data["proteins"]))
+
+
 if __name__ == "__main__":
     unittest.main()

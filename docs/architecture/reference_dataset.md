@@ -1,86 +1,85 @@
-# Deterministic evidence-aware reference dataset (PR after core merge)
+# Skvoznaia proverka UniProt → Rhea RDF → ChEBI (v2 preview)
 
-Status: **offline builder prototype**, not yet a complete five-EC release
-dataset. No live dataset or bulk dump is committed.
+Status: **optional end-to-end integration and deterministic result projection**.
+This is a testable feature of EnzymeInfoCollector, **not a separate
+published scientific dataset**. The original v1 CLI is unchanged.
 
-## Scope and scientific rules
+## Data provenance and biological semantics
 
-`build_reference_dataset(evidence, rhea_records, compounds, rhea_source=...)`
-joins data only through already **directly annotated UniProt→Rhea master IDs**.
-It does **not** infer Protein↔Reaction assertions from shared EC classification.
+1. `DirectEvidenceCollector` obtains direct UniProtKB catalytic
+   annotations, per-statement ECO/citations and Rhea directional/master
+   IDs. Shared EC numbers never create a Protein–Reaction edge.
+2. `fetch_rhea_participants` fetches the **specific master reaction IDs
+   from those assertions**, up to 25 masters and in batches of 5. Its
+   bounded Rhea SPARQL queries use `rh:side`, `rh:curatedOrder`,
+   `rh:contains` subproperties, `rh:coefficient` and direct
+   `rh:chebi`. Rhea RDF responses missing any requested reaction or
+   containing unsupported compound types fail closed. No text-equation
+   parsing and no invented stoichiometry.
+3. `ChEBICollector` enriches only the ChEBI participant IDs required by
+   the selected reactions, up to 100 distinct IDs. Primary/secondary
+   ID mappings remain explicit.
+4. `build_verified_reference_dataset` produces deterministic JSON with
+   protein↔Rhea directional assertions, ECO/citations, reaction
+   equation sides, exact decimal coefficients, compounds, unresolved
+   IDs and per-source retrieval hashes.
 
-Inputs:
-- `DirectEvidenceDataset` from the canonical `DirectEvidenceCollector`
-  (UniProt, Rhea directions, ECO/citations, entry/sequence versions).
-- Rhea reaction dictionaries from `sources.fetch_rhea`: explicit
-  `rhea_id`, `equation`, and flat `chebi_ids`.
-- `ChEBICollection` from `ChEBICollector.enrich_rhea_records`: primary
-  compound descriptions plus evidence of secondary-ID resolution.
-- `SourceRelease(database="Rhea", ...)` for the actual reaction-query snapshot.
+**Left/right are Rhea equation sides, not necessarily in-vivo
+substrate/product roles.** A coefficient is represented as a decimal
+**string**, preventing float rounding. The source's actual ChEBI ID
+is retained before canonical normalization. Existing `build_reference_dataset`
+still explicitly represents unknown sides/coefficients as `null`
+when only legacy flat reaction lists are available.
 
-The final JSON has `proteins`, `reactions`, `compounds`, `provenance`,
-`unresolved`, and `semantic_sha256` fields. The digest covers canonical
-UTF-8 JSON **including source retrieval metadata**, excluding the digest
-field itself. Reordered identical input records produce byte-identical JSON.
+Snapshot hashes in this initial API are *HTTP response content hashes*,
+not claims of official historical bulk release IDs. The result
+`semantic_sha256` includes the source retrieval metadata; identical
+record content from different retrieval times is therefore not claimed
+to be byte-identical. No bulk source dumps are embedded in the repo.
 
-Importing a compound record does not prove a protein catalyzes anything.
-Missing reaction rows are reported in `unresolved.missing_rhea_master_ids`;
-ChEBI IDs not present in explicitly resolved ChEBI records are preserved
-as `unresolved.unresolved_chebi_ids`, not silently dropped.
+## Invocation (network I/O; excluded from offline CI)
 
-**Critical limitation:** The current Rhea EC query exposes `chebi_ids`
-as a *flat list*, with no authoritative left/right equation side or
-stoichiometric coefficient. Every projected chemical membership therefore
-has `side: null` and `coefficient: null`. This is *not* yet a full
-ReactionParticipant dataset and must not be used as if it had known
-substrates, products or mass-balanced stoichiometry.
+~~~bash
+python -m enzymeinfocollector.reference_cli \
+  --accession P00330 \
+  --output integrated.json
 
-## Example (illustrative integration)
-
-~~~python
-from enzymeinfocollector.compound_sources import ChEBICollector
-from enzymeinfocollector.domain import SourceRelease
-from enzymeinfocollector.evidence_sources import DirectEvidenceCollector
-from enzymeinfocollector.reference_dataset import (
-    build_reference_dataset, reference_json,
-)
-from enzymeinfocollector.sources import HttpCache, default_cache_dir, fetch_rhea
-
-cache = HttpCache(default_cache_dir())
-evidence = DirectEvidenceCollector(cache).collect(["P00330", "P00331"])
-reactions, metadata = fetch_rhea("1.1.1.1", cache)
-compounds = ChEBICollector(cache).enrich_rhea_records(reactions)
-rhea_source = SourceRelease(
-    database="Rhea",
-    release="live-ec-query-not-a-pinned-release",
-    retrieved_at=metadata["fetched_at"],
-    source_url=metadata["url"],
-)
-reference = build_reference_dataset(
-    evidence, reactions, compounds, rhea_source=rhea_source
-)
-print(reference_json(reference))
+python -m enzymeinfocollector.reference_cli \
+  --accession P00330 --refresh --contact-email you@example.org \
+  --output integrated.json
 ~~~
 
-This example is deliberately **not** a pinned bulk snapshot: timestamps,
-upstream responses and ChEBI API results can change. For a reproducible
-scientific release, archive the original source files with SHA-256, record
-official release IDs where available, and replay from those snapshots.
-The builder preserves provenance when supplied; it does not invent it.
+The command is **opt-in**, uses the existing HTTP cache, and writes files
+atomically on success. An upstream failure does not replace an existing
+output file. At least one direct Rhea annotation is needed; 25 master
+reactions / 100 distinct ChEBI compounds are safety ceilings.
+Source exceptions (e.g. complex/polymers without a direct `rh:chebi`)
+are **reported as an error**, not silently approximated.
 
-## Acceptance and next work
+## Offline regression acceptance
 
-- Offline fixtures verify EC does not create edges, compound secondary IDs
-  resolve explicitly, unknowns remain visible, source records cannot
-  conflict silently, evidence is preserved and semantic hashes are stable.
-- Add a pinned, published UniProt/Rhea/ChEBI reference snapshot covering
-  5–10 EC classes, with full source file SHA-256 and legal attributions.
-- Add **Rhea reaction participant side + stoichiometry** extraction and
-  chemically validated reaction-level joins (not the EC-shaped old format).
-- Extend TrEMBL validation to its own mapping and reconcile RDF ECO statement
-  provenance where available.
-- Keep GraphML/CX2 a projection of these canonical records, not a parallel
-  source of truth.
+`python -m unittest discover -s tests -v` on Python 3.11 and 3.13.
 
-The offline builder is isolated from legacy CLI and adds no runtime
-dependencies or network calls to CI.
+Coverage includes accurate Rhea sides and coefficients, duplicate/
+contradictory reaction IDs, missing/truncated RDF responses, absence of
+ChEBI direct identity, unknown/empty associations, no EC join, source
+hashes, stable projection and atomic file writes.
+
+A separate manual live check is required before declaring the
+integration ready for broad enzyme classes. Live API response drift
+is not an offline CI failure.
+
+## Next work
+
+- Complete manual end-to-end checks for several Swiss-Prot and TrEMBL
+  entries, including missing and unsupported compound cases.
+- Use a few **small canonical test fixtures** rather than publishing a
+  large independent dataset.
+- Export GraphML and Cytoscape JSON projections, with typed edges and
+  ECO/citation provenance (issue #3). Do not add Neo4j.
+- Make the final user-facing CLI ergonomic after validating semantics.
+
+Sources: [Rhea SPARQL API](https://www.rhea-db.org/help/sparql),
+[Rhea reaction sides](https://www.rhea-db.org/help/reaction-side-direction),
+[UniProt documentation](https://www.uniprot.org/help/api_queries),
+[ChEBI REST](https://www.ebi.ac.uk/chebi/backend/api/public/compound/CHEBI:15377/?format=json).
