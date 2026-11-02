@@ -2,7 +2,7 @@
 
 **Scope:** end-user flow name/EC → bounded UniProt candidate → direct Rhea → chemistry → graph, not a biological recall/accuracy claim.
 
-The [discovery_cases.json](discovery_cases.json) matrix includes seven opt-in scenarios: catalase by name and EC; bacterial phosphoglycerate kinase; human translocase; TrEMBL catalase; pig amylase with no numeric Rhea annotation; and ambiguous enzyme name.
+The [discovery_cases.json](discovery_cases.json) matrix includes seven opt-in scenarios: catalase by name and EC; bacterial phosphoglycerate kinase; human translocase; TrEMBL catalase; pig amylase with no numeric Rhea annotation; and ambiguous exact enzyme name luciferase (four EC matches).
 
 From the repository root, run:
 

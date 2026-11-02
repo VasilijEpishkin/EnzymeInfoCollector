@@ -73,7 +73,7 @@
     {
       "id": "ambiguous-name",
       "input": {
-        "enzyme": "dehydrogenase",
+        "enzyme": "luciferase",
         "max_proteins": 1,
         "reviewed_only": true
       },

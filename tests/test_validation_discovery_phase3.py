@@ -1,6 +1,8 @@
 """Offline guardrails for name/EC discovery workflow benchmark."""
 from __future__ import annotations
 import unittest
+import json
+from pathlib import Path
 from benchmarks.validation_v1.phase3_discovery import classify_failure, score_reference
 
 
@@ -48,6 +50,13 @@ def reference():
 class Phase3DiscoveryTests(unittest.TestCase):
     def test_source_pinned_selected_protein_graph(self):
         self.assertEqual(score_reference(case(), reference(), gold())["status"], "pass")
+
+    def test_ambiguous_source_scenario_is_not_a_generic_partial_name(self):
+        root = Path(__file__).resolve().parents[1]
+        manifest = json.loads((root / "benchmarks/validation_v1/discovery_cases.json").read_text(encoding="utf-8"))
+        scenario = next(x for x in manifest["cases"] if x["id"] == "ambiguous-name")
+        self.assertEqual(scenario["input"]["enzyme"], "luciferase")
+        self.assertEqual(scenario["expected"], "ambiguous")
 
     def test_name_and_ec_both_supported(self):
         scenario = case()
