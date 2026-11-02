@@ -19,7 +19,7 @@ class ValidationBenchmarkTests(unittest.TestCase):
         self.assertEqual(len({x["accession"] for x in cases}), 20)
         self.assertEqual({str(i) for i in range(1, 8)},
                          {x.split(".")[0] for c in cases for x in c["ec"]})
-        self.assertEqual(sum(c["master_ids"] is not None for c in cases), 19)
+        self.assertEqual(sum(c["master_ids"] is not None for c in cases), 20)
         self.assertEqual(sum(c["reviewed"] is False for c in cases), 1)
         self.assertEqual(sum(c["master_ids"] == [] for c in cases), 5)
 
@@ -30,7 +30,7 @@ class ValidationBenchmarkTests(unittest.TestCase):
         self.assertEqual(result["summary"]["scored"], 0)
         self.assertIsNone(result["summary"]["source_agreement_precision"])
         self.assertIsNone(result["summary"]["source_agreement_recall"])
-        self.assertEqual(result["summary"]["unverified_gold"], 1)
+        self.assertEqual(result["summary"]["unverified_gold"], 0)
 
     def test_source_consistency_tp_fp_fn_and_drift(self):
         sha = "a" * 64

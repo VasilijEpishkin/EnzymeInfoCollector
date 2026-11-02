@@ -13,12 +13,12 @@ def main(argv=None) -> int:
     p.add_argument("--manifest", type=Path, default=Path(__file__).with_name("cases.json"))
     p.add_argument("--results-dir", type=Path, required=True)
     p.add_argument("--max-cases", type=int, default=3,
-                   help="At most 19 verified records; default 3")
+                   help="At most 20 verified records; default 3")
     p.add_argument("--refresh", action="store_true")
     p.add_argument("--timeout", type=int, default=120)
     args = p.parse_args(argv)
-    if not 1 <= args.max_cases <= 19 or not 10 <= args.timeout <= 300:
-        p.error("--max-cases must be 1..19, --timeout 10..300 seconds")
+    if not 1 <= args.max_cases <= 20 or not 10 <= args.timeout <= 300:
+        p.error("--max-cases must be 1..20, --timeout 10..300 seconds")
     cases = json.loads(args.manifest.read_text(encoding="utf-8"))["cases"]
     checked = [x for x in cases if x["master_ids"] is not None]
     if len(checked) < args.max_cases:

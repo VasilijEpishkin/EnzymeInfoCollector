@@ -4,8 +4,8 @@ This is a **first reproducible benchmark stage**, not a completed 20-protein end
 
 ## Source truth and coverage
 
-- The matrix contains 19 UniProtKB entries inspected directly on 2026-11-02 via official JSON REST API. Every entry has a raw-response SHA-256, reviewed status, NCBI taxon ID, EC classification, and the set of *numeric Rhea master IDs appearing in catalytic-activity comments*. These are source observations, NOT laboratory truth. The matrix covers all seven top-level EC classes, several organisms, multiple-reaction enzymes, and five verified examples with no direct numeric Rhea cross-reference.
-- The twentieth entry, A0A024QG36, was seen only in an official UniProt TSV search as unreviewed, taxon 61016, EC 1.11.1.6. Its full accession record was NOT inspected; its master IDs are null and it cannot be scored.
+- The matrix contains 20 UniProtKB entries inspected directly on 2026-11-02 via official JSON REST API. Every entry has a raw-response SHA-256, reviewed status, NCBI taxon ID, EC classification, and the set of *numeric Rhea master IDs appearing in catalytic-activity comments*. These are source observations, NOT laboratory truth. The matrix covers all seven top-level EC classes, several organisms, multiple-reaction enzymes, and five verified examples with no direct numeric Rhea cross-reference.
+- A0A024QG36 was independently checked through official UniProt REST JSON: unreviewed TrEMBL catalase, taxon 61016, EC 1.11.1.6, directly annotated master RHEA:20309, with a recorded raw response SHA-256. TrEMBL remains excluded from Swiss-Prot-only independent mapping validation, but can be scored for JSON extraction.
 - RHEA-COMP entries and non-numeric cross-references do not count as reaction master IDs. An empty set of direct Rhea links is **unknown biology**, not experimental inactivity.
 - Source SHA-256 is an HTTP response observation digest, NOT a historical release archive. If the current response differs, status is source_drift, not an automatically inferred code regression.
 
@@ -16,7 +16,7 @@ From the repository root run:
     python benchmarks/validation_v1/run_live.py --results-dir /tmp/enzyme-validation --max-cases 3
     python benchmarks/validation_v1/compare.py --results-dir /tmp/enzyme-validation -o /tmp/enzyme-validation/report.json
 
-Set --max-cases 19 to try all currently verified source entries. This invokes the existing evidence_cli collect once for each accession, using its cache, upstream provenance and Rhea directional-ID reconciliation. A failing request, missing result, incompatible document, unverified gold or changed source snapshot never silently contributes to false negatives.
+Set --max-cases 20 to try all currently verified source entries. This invokes the existing evidence_cli collect once for each accession, using its cache, upstream provenance and Rhea directional-ID reconciliation. A failing request, missing result, incompatible document, unverified gold or changed source snapshot never silently contributes to false negatives.
 
 The offline comparator scores **source extraction consistency** at the protein-to-Rhea-master-ID level:
 TP is present in both UniProt reference snapshot and tool output; FP is output only; FN is reference only. No TN is defined. Statuses not_run, unverified_gold, source_drift and invalid_output are excluded. This is NOT biological precision, evidence-quality assessment, kinetic validation or chemical reaction verification.

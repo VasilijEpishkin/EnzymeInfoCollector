@@ -304,16 +304,18 @@
     },
     {
       "accession": "A0A024QG36",
-      "name": null,
+      "name": "Catalase",
       "taxon_id": 61016,
       "reviewed": false,
       "ec": [
         "1.11.1.6"
       ],
-      "master_ids": null,
-      "uniprot_sha256": null,
-      "verification": "Official UniProt search TSV only; full entry not checked",
-      "tag": "unreviewed-search-only"
+      "master_ids": [
+        "RHEA:20309"
+      ],
+      "uniprot_sha256": "415656e6de2a37d571798523b0eb5ea81ffb54b285b563cd6a5cec2bf6360a03",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "unreviewed-TrEMBL"
     }
   ]
 }
