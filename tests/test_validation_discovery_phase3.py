@@ -86,6 +86,9 @@ class Phase3DiscoveryTests(unittest.TestCase):
         service = classify_failure(scenario, 1,
             "Evidence discovery failed: Request failed for rest.uniprot.org: HTTP Error 503", False)
         self.assertEqual(service["status"], "upstream_failure")
+        wrong = classify_failure(scenario, 1,
+            "No selected proteins had a direct UniProt→Rhea catalytic annotation; checked ['P00330']", False)
+        self.assertEqual(wrong["status"], "unexpected_error")
         self.assertEqual(classify_failure(scenario, 1, "No selected proteins had a direct UniProt", True)["status"],
                          "unexpected_error")
 

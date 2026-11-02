@@ -6,7 +6,6 @@ search-selection drift, and missing direct annotations are distinct statuses.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 from pathlib import Path
 import subprocess
@@ -110,6 +109,11 @@ def classify_failure(case: dict, returncode: int, stderr: str, output_exists: bo
         "ambiguous": "Ambiguous enzyme name",
     }
     if case["expected"] in expectations and expectations[case["expected"]] in stderr:
+        if case["expected"] == "no_direct":
+            checked = "checked ['" + case["accession"] + "']"
+            if checked not in stderr:
+                return {"id": label, "status": "unexpected_error",
+                        "reason": "No-direct failure did not identify the expected candidate"}
         return {"id": label, "status": "pass", "expected_failure": case["expected"]}
     if "Request failed for " in stderr or "HTTP Error" in stderr or "timed out" in stderr:
         return {"id": label, "status": "upstream_failure", "reason": stderr[-350:]}
@@ -134,7 +138,8 @@ def run_case(case: dict, results_dir: Path, source_cases: dict, timeout: int) ->
     if not flags["reviewed_only"]:
         cmd.append("--include-unreviewed")
     try:
-        process = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout)
+        process = subprocess.run(cmd, text=True, capture_output=True, timeout=timeout,
+                                 cwd=Path(__file__).resolve().parents[2])
     except subprocess.TimeoutExpired:
         return {"id": case["id"], "status": "upstream_failure", "reason": "CLI time limit"}
     if process.returncode:
