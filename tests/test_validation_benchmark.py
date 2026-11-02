@@ -21,7 +21,7 @@ class ValidationBenchmarkTests(unittest.TestCase):
                          {x.split(".")[0] for c in cases for x in c["ec"]})
         self.assertEqual(sum(c["master_ids"] is not None for c in cases), 19)
         self.assertEqual(sum(c["reviewed"] is False for c in cases), 1)
-        self.assertEqual(sum(c["master_ids"] == [] for c in cases), 4)
+        self.assertEqual(sum(c["master_ids"] == [] for c in cases), 5)
 
     def test_missing_runs_never_generate_quality_metrics(self):
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))

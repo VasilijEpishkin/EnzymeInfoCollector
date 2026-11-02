@@ -4,7 +4,7 @@ This is a **first reproducible benchmark stage**, not a completed 20-protein end
 
 ## Source truth and coverage
 
-- The matrix contains 19 UniProtKB entries inspected directly on 2026-11-02 via official JSON REST API. Every entry has a raw-response SHA-256, reviewed status, NCBI taxon ID, EC classification, and the set of *numeric Rhea master IDs appearing in catalytic-activity comments*. These are source observations, NOT laboratory truth. The matrix covers all seven top-level EC classes, several organisms, multiple-reaction enzymes, and four verified examples with no direct numeric Rhea cross-reference.
+- The matrix contains 19 UniProtKB entries inspected directly on 2026-11-02 via official JSON REST API. Every entry has a raw-response SHA-256, reviewed status, NCBI taxon ID, EC classification, and the set of *numeric Rhea master IDs appearing in catalytic-activity comments*. These are source observations, NOT laboratory truth. The matrix covers all seven top-level EC classes, several organisms, multiple-reaction enzymes, and five verified examples with no direct numeric Rhea cross-reference.
 - The twentieth entry, A0A024QG36, was seen only in an official UniProt TSV search as unreviewed, taxon 61016, EC 1.11.1.6. Its full accession record was NOT inspected; its master IDs are null and it cannot be scored.
 - RHEA-COMP entries and non-numeric cross-references do not count as reaction master IDs. An empty set of direct Rhea links is **unknown biology**, not experimental inactivity.
 - Source SHA-256 is an HTTP response observation digest, NOT a historical release archive. If the current response differs, status is source_drift, not an automatically inferred code regression.
