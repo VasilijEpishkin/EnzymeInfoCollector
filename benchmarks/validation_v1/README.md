@@ -38,3 +38,7 @@ accession regex accidentally accepted 11-character variants and rejected
 valid 10-character identifiers. Updated to match the official UniProt help
 pattern for 6-/10-character accessions with a regression test.
 See https://www.uniprot.org/help/accession_numbers .
+
+## Observed benchmark outcome
+
+See reports/2026-11-02-live.md for the 20-case source-consistency run and four separate full-reference edge/boundary checks. None of these outcomes imply global biological or reaction chemistry accuracy.
