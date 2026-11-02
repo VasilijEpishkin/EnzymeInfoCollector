@@ -42,3 +42,31 @@ See https://www.uniprot.org/help/accession_numbers .
 ## Observed benchmark outcome
 
 See reports/2026-11-02-live.md for the 20-case source-consistency run and four separate full-reference edge/boundary checks. None of these outcomes imply global biological or reaction chemistry accuracy.
+
+## Phase 2: direct evidence details and Rhea chemistry
+
+Official source/experiment report: [reports/2026-11-02-phase2.md](reports/2026-11-02-phase2.md).
+These are **separate** bounded checks. Do not confuse accuracy of transferring
+a source annotation with proof of an enzyme's activity.
+
+1. Export one UniProt evidence entry at a time with
+   `python -m enzymeinfocollector.evidence_cli collect --accession P00558 -o evidence/P00558.json`.
+   Then compare against exactly the official UniProt raw response:
+   `python benchmarks/validation_v1/phase2_evidence.py --evidence-dir evidence --fetch --accession P00558`.
+   Alternatively pass `--raw-dir raw` with archived byte-exact official
+   `P00558.json`. Source SHA mismatches are `source_drift`, not wrong ECO.
+2. For reviewed proteins, independently compare all Rhea master+direction
+   IDs against the official Swiss-Prot mapping with
+   `python -m enzymeinfocollector.evidence_cli validate --accession P00558`.
+   Do **not** pass TrEMBL to the Swiss-Prot-specific mapping.
+3. Export chemistry with
+   `python -m enzymeinfocollector.reference_cli --accession P04040 -o ref/P04040.json`.
+   For all five reference cases stored in
+   [chemistry_cases.json](chemistry_cases.json), run
+   `python benchmarks/validation_v1/phase2_chemistry.py --reference-dir ref`.
+   A missing case, changed SPARQL response SHA or participant mismatch
+   prevents a complete passing benchmark.
+   The compact gold records were independently re-read from the
+   official Rhea SPARQL result bindings; no textual-equation parsing.
+   This checks reported CHEBI IDs, not experimentally validated chemical
+   structures or inferred physiological reaction direction.

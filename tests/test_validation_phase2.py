@@ -114,6 +114,14 @@ class Phase2ChemistryTests(unittest.TestCase):
         doc["provenance"]["rhea_participant_queries"][0]["sha256"] = "a" * 64
         self.assertEqual(chemistry_compare(case, doc)["status"], "source_drift")
 
+    def test_rhea_water_and_proton_are_not_collapsed(self):
+        manifest = json.loads(CASES.read_text(encoding="utf-8"))
+        translocase = next(x for x in manifest["cases"] if x["accession"] == "P05023")
+        ids = {m["reported_chebi_id"] for m in translocase["members"]}
+        self.assertIn("CHEBI:15377", ids)  # water
+        self.assertIn("CHEBI:15378", ids)  # hydron
+        self.assertNotEqual("CHEBI:15377", "CHEBI:15378")
+
     def test_unresolved_chebi_cannot_claim_resolved_status(self):
         case, doc = self.sample()
         member = doc["reactions"][0]["compound_membership"][0]

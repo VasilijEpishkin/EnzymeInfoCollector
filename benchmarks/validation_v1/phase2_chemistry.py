@@ -97,7 +97,7 @@ def main(argv=None):
         args.output.write_text(output, encoding="utf-8")
     else:
         print(output, end="")
-    return int(any(x["status"] not in ("pass", "not_run") for x in rows))
+    return int(any(x["status"] != "pass" for x in rows))
 
 
 if __name__ == "__main__":

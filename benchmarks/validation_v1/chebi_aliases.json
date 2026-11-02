@@ -1,0 +1,33 @@
+{
+  "schema": "enzymeinfo-chebi-alias-observations-v1",
+  "observed_utc": "2026-11-02",
+  "basis": "Exact official ChEBI REST replies to canonical and secondary accession paths; same body SHA within an alias pair",
+  "api_template": "https://www.ebi.ac.uk/chebi/backend/api/public/compound/{CHEBI_ID}/?format=json",
+  "observations": [
+    {
+      "requested": "CHEBI:15377",
+      "returned_id": 15377,
+      "name": "water",
+      "sha256": "ad68f5da6609b5055120cb413e5445f1e560599746a3ea56a31dd8e39eaf5c97"
+    },
+    {
+      "requested": "CHEBI:5585",
+      "returned_id": 15377,
+      "name": "water",
+      "sha256": "ad68f5da6609b5055120cb413e5445f1e560599746a3ea56a31dd8e39eaf5c97"
+    },
+    {
+      "requested": "CHEBI:15378",
+      "returned_id": 15378,
+      "name": "hydron",
+      "sha256": "f34a9e435d0819031a1afea1406458164ca0b89f267c9bf5d2c612f9d3a10e5f"
+    },
+    {
+      "requested": "CHEBI:5584",
+      "returned_id": 15378,
+      "name": "hydron",
+      "sha256": "f34a9e435d0819031a1afea1406458164ca0b89f267c9bf5d2c612f9d3a10e5f"
+    }
+  ],
+  "note": "Secondary-ID canonicalization is not protonation-state equivalence; CHEBI:15377 != CHEBI:15378."
+}
