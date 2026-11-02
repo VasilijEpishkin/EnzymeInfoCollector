@@ -1,0 +1,83 @@
+{
+  "schema": "enzymeinfo-discovery-workflows-v1",
+  "scope": "Opt-in bounded name/EC -> UniProt candidate -> direct Rhea -> chemistry -> graph; exact single-protein pilot, not global search coverage",
+  "cases": [
+    {
+      "id": "catalase-name",
+      "input": {
+        "enzyme": "Catalase",
+        "taxon_id": 9606,
+        "max_proteins": 1,
+        "reviewed_only": true
+      },
+      "expected": "linked",
+      "accession": "P04040",
+      "truncated": false
+    },
+    {
+      "id": "catalase-ec",
+      "input": {
+        "ec": "1.11.1.6",
+        "taxon_id": 9606,
+        "max_proteins": 1,
+        "reviewed_only": true
+      },
+      "expected": "linked",
+      "accession": "P04040",
+      "truncated": false
+    },
+    {
+      "id": "bacterial-pgk",
+      "input": {
+        "ec": "2.7.2.3",
+        "taxon_id": 83333,
+        "max_proteins": 1,
+        "reviewed_only": true
+      },
+      "expected": "linked",
+      "accession": "P0A799"
+    },
+    {
+      "id": "human-translocase",
+      "input": {
+        "ec": "7.2.2.13",
+        "taxon_id": 9606,
+        "max_proteins": 1,
+        "reviewed_only": true
+      },
+      "expected": "linked",
+      "accession": "P05023"
+    },
+    {
+      "id": "trembl-catalase",
+      "input": {
+        "ec": "1.11.1.6",
+        "taxon_id": 61016,
+        "max_proteins": 1,
+        "reviewed_only": false
+      },
+      "expected": "linked",
+      "accession": "A0A024QG36"
+    },
+    {
+      "id": "pig-amylase-no-direct",
+      "input": {
+        "ec": "3.2.1.1",
+        "taxon_id": 9823,
+        "max_proteins": 1,
+        "reviewed_only": true
+      },
+      "expected": "no_direct",
+      "accession": "P00690"
+    },
+    {
+      "id": "ambiguous-name",
+      "input": {
+        "enzyme": "luciferase",
+        "max_proteins": 1,
+        "reviewed_only": true
+      },
+      "expected": "ambiguous"
+    }
+  ]
+}
