@@ -1,0 +1,209 @@
+{
+  "schema": "enzymeinfo-rhea-chemistry-v1",
+  "observed_utc": "2026-11-02",
+  "scope": "Only authoritative RDF SPARQL side, reported ChEBI identifier, decimal coefficient; no biological direction or ChEBI structure truth",
+  "cases": [
+    {
+      "accession": "P04040",
+      "expected_query_sha256": [
+        "95547d56528b4aff5731d3319474fff7f414b67665c29ac2b9315c9daf7e2cef"
+      ],
+      "members": [
+        {
+          "master_id": "RHEA:20309",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:16240",
+          "coefficient": "2"
+        },
+        {
+          "master_id": "RHEA:20309",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:15377",
+          "coefficient": "2"
+        },
+        {
+          "master_id": "RHEA:20309",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:15379",
+          "coefficient": "1"
+        }
+      ]
+    },
+    {
+      "accession": "P05023",
+      "expected_query_sha256": [
+        "4e3a0c625d573e1ef8591ab8c2d81ac0c0f3a16fd5118076c3c20a290fa0bc1d"
+      ],
+      "members": [
+        {
+          "master_id": "RHEA:18353",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:15377",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:18353",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:29101",
+          "coefficient": "3"
+        },
+        {
+          "master_id": "RHEA:18353",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:29103",
+          "coefficient": "2"
+        },
+        {
+          "master_id": "RHEA:18353",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:30616",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:18353",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:15378",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:18353",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:29101",
+          "coefficient": "3"
+        },
+        {
+          "master_id": "RHEA:18353",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:29103",
+          "coefficient": "2"
+        },
+        {
+          "master_id": "RHEA:18353",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:43474",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:18353",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:456216",
+          "coefficient": "1"
+        }
+      ]
+    },
+    {
+      "accession": "P00918",
+      "expected_query_sha256": [
+        "8a52d832d993dcdde6cc230b8f2b4be79bf8fb674a44c7cae2006a44cf27d5e8"
+      ],
+      "members": [
+        {
+          "master_id": "RHEA:10748",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:15378",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:10748",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:17544",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:10748",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:15377",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:10748",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:16526",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:23056",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:16199",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:23056",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:15377",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:23056",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:16698",
+          "coefficient": "1"
+        }
+      ]
+    },
+    {
+      "accession": "P04075",
+      "expected_query_sha256": [
+        "c280effb9f1caab41df5edc02b5106094238a45b87a3efc6d9ac7bb163687dba"
+      ],
+      "members": [
+        {
+          "master_id": "RHEA:14729",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:32966",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:14729",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:57642",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:14729",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:59776",
+          "coefficient": "1"
+        }
+      ]
+    },
+    {
+      "accession": "P22303",
+      "expected_query_sha256": [
+        "c84d8a58d31b42b45f5a6588bf0c363f7c9c6c3499a60bb02cea63b62c3fccfb"
+      ],
+      "members": [
+        {
+          "master_id": "RHEA:17561",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:15355",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:17561",
+          "side": "left",
+          "reported_chebi_id": "CHEBI:15377",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:17561",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:15354",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:17561",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:15378",
+          "coefficient": "1"
+        },
+        {
+          "master_id": "RHEA:17561",
+          "side": "right",
+          "reported_chebi_id": "CHEBI:30089",
+          "coefficient": "1"
+        }
+      ]
+    }
+  ]
+}
