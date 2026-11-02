@@ -29,3 +29,12 @@ TP is present in both UniProt reference snapshot and tool output; FP is output o
 4. Report actual live results including attempted runs, source drift, truncated/unsupported chemistry, TP/FP/FN and SHA. Do not claim a passing 20-case benchmark until measured.
 
 Sources: https://rest.uniprot.org/uniprotkb/P04040.json and the corresponding accession records; https://ftp.expasy.org/databases/rhea/tsv/rhea-directions.tsv . No new mandatory Python dependencies or new database.
+
+## Defect reproduced and fixed by this benchmark
+
+During the 20-case live run, 19 entries completed and the valid unreviewed
+accession A0A024QG36 was rejected locally as invalid. The shared UniProt
+accession regex accidentally accepted 11-character variants and rejected
+valid 10-character identifiers. Updated to match the official UniProt help
+pattern for 6-/10-character accessions with a regression test.
+See https://www.uniprot.org/help/accession_numbers .

@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from benchmarks.validation_v1.compare import evaluate
+from enzymeinfocollector.sources import UNIPROT_ACCESSION
 
 MANIFEST = Path(__file__).resolve().parents[1] / "benchmarks" / "validation_v1" / "cases.json"
 
@@ -22,6 +23,15 @@ class ValidationBenchmarkTests(unittest.TestCase):
         self.assertEqual(sum(c["master_ids"] is not None for c in cases), 20)
         self.assertEqual(sum(c["reviewed"] is False for c in cases), 1)
         self.assertEqual(sum(c["master_ids"] == [] for c in cases), 5)
+
+    def test_uniprot_accessions_match_official_six_and_ten_character_patterns(self):
+        # Regression: real TrEMBL accession A0A024QG36 was rejected by v2.
+        for accession in ("P04040", "P0A799", "A0A024QG36", "A0A022YWF9"):
+            with self.subTest(accession=accession):
+                self.assertIsNotNone(UNIPROT_ACCESSION.fullmatch(accession))
+        for malformed in ("A0A024QG3", "A0A02412345", "A0A024QG360", "X12345", "P04040;X"):
+            with self.subTest(malformed=malformed):
+                self.assertIsNone(UNIPROT_ACCESSION.fullmatch(malformed))
 
     def test_missing_runs_never_generate_quality_metrics(self):
         manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
