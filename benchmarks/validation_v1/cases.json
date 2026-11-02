@@ -1,0 +1,321 @@
+{
+  "schema": "enzymeinfo-uniprot-direct-benchmark-v1",
+  "observed_utc": "2026-11-02",
+  "truth_scope": "Direct numeric Rhea master IDs from UniProtKB catalytic-activity reaction cross-references; NOT biological truth",
+  "source_url_template": "https://rest.uniprot.org/uniprotkb/{accession}.json",
+  "cases": [
+    {
+      "accession": "P04040",
+      "name": "Catalase",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "1.11.1.6"
+      ],
+      "master_ids": [
+        "RHEA:20309"
+      ],
+      "uniprot_sha256": "e40614a2d7430f05041308a832975688b1dbb2484fea860ee8d40e58c45574e5",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "baseline"
+    },
+    {
+      "accession": "P00330",
+      "name": "Alcohol dehydrogenase 1",
+      "taxon_id": 559292,
+      "reviewed": true,
+      "ec": [
+        "1.1.1.1",
+        "1.1.1.54",
+        "1.1.1.78"
+      ],
+      "master_ids": [
+        "RHEA:10736",
+        "RHEA:10740",
+        "RHEA:25290",
+        "RHEA:12168",
+        "RHEA:50704",
+        "RHEA:33199",
+        "RHEA:60972",
+        "RHEA:24528",
+        "RHEA:24620",
+        "RHEA:64560",
+        "RHEA:41984",
+        "RHEA:64692"
+      ],
+      "uniprot_sha256": "9c4e0b1eb9cec87024f455839fd0750b0ba6c320ac379e48e947130ee87c4f0a",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "multiple-masters"
+    },
+    {
+      "accession": "P00331",
+      "name": "Alcohol dehydrogenase 2",
+      "taxon_id": 559292,
+      "reviewed": true,
+      "ec": [
+        "1.1.1.1"
+      ],
+      "master_ids": [
+        "RHEA:10736",
+        "RHEA:10740",
+        "RHEA:25290",
+        "RHEA:33199",
+        "RHEA:60972"
+      ],
+      "uniprot_sha256": "fbb037265d2bbf647a047e65ea7887a81f2db0e20f8382fa9c400a501ba14bac",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "same-EC-different-annotations"
+    },
+    {
+      "accession": "P00558",
+      "name": "Phosphoglycerate kinase 1",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "2.7.11.1",
+        "2.7.2.3"
+      ],
+      "master_ids": [
+        "RHEA:14801",
+        "RHEA:17989"
+      ],
+      "uniprot_sha256": "b20025a7498160ccce2d1f6fc1e88b8500b9122e7143ec0bc46af9e0532dcf60",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "RHEA-COMP-crossreferences"
+    },
+    {
+      "accession": "P00918",
+      "name": "Carbonic anhydrase 2",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "4.2.1.1"
+      ],
+      "master_ids": [
+        "RHEA:10748",
+        "RHEA:23056"
+      ],
+      "uniprot_sha256": "bf5b6447afcadab512f1a7e055202c4a85beb25845f1ffd8a3ef9dca1752641a",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "multiple-reactions"
+    },
+    {
+      "accession": "P00533",
+      "name": "Epidermal growth factor receptor",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "2.7.10.1"
+      ],
+      "master_ids": [
+        "RHEA:10596"
+      ],
+      "uniprot_sha256": "90c459656751eac791efc2f369f49145d38cc949f5b41bf628180ac0a6874b02",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "RHEA-COMP-crossreferences"
+    },
+    {
+      "accession": "P00505",
+      "name": "Aspartate aminotransferase mitochondrial",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "2.6.1.1",
+        "2.6.1.7"
+      ],
+      "master_ids": [
+        "RHEA:21824",
+        "RHEA:65560"
+      ],
+      "uniprot_sha256": "5bd9b81eeb5e2943b6105398b33350a2ae59193b4058be0c73e63bb173151761",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "multiple-EC"
+    },
+    {
+      "accession": "P22303",
+      "name": "Acetylcholinesterase",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "3.1.1.7"
+      ],
+      "master_ids": [
+        "RHEA:17561"
+      ],
+      "uniprot_sha256": "094e811d17beb4531f7cbe4a98ea79d865e7d874c6bd433bfdd723804a64f19d",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "hydrolase"
+    },
+    {
+      "accession": "P04075",
+      "name": "Fructose-bisphosphate aldolase A",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "4.1.2.13"
+      ],
+      "master_ids": [
+        "RHEA:14729"
+      ],
+      "uniprot_sha256": "f93ac5461b042a856797892edf6f656b325b9561f013bc91f84e6b43b96bc272",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "lyase"
+    },
+    {
+      "accession": "P60174",
+      "name": "Triosephosphate isomerase",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "5.3.1.1"
+      ],
+      "master_ids": [
+        "RHEA:18585",
+        "RHEA:17937"
+      ],
+      "uniprot_sha256": "25b200a9f5f22f24d68d7f64445b447770b1875126829b1de2f9e7e01cc6acdd",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "isomerase"
+    },
+    {
+      "accession": "P00690",
+      "name": "Pancreatic alpha-amylase",
+      "taxon_id": 9823,
+      "reviewed": true,
+      "ec": [
+        "3.2.1.1"
+      ],
+      "master_ids": [],
+      "uniprot_sha256": "707bb4f5f8ce68879e267830d5ccd76b985bb2db92f84b2434b6a7cf3b8b2508",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "activity-comment-without-Rhea"
+    },
+    {
+      "accession": "P00734",
+      "name": "Prothrombin",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "3.4.21.5"
+      ],
+      "master_ids": [],
+      "uniprot_sha256": "12b2fe76c823d49eacd079d88ef182a6c9fd3115da841d446f5f1e542fff3293",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "protein-substrate"
+    },
+    {
+      "accession": "P08253",
+      "name": "72 kDa type IV collagenase",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "3.4.24.24"
+      ],
+      "master_ids": [],
+      "uniprot_sha256": "8ef9371aff65b7002f28afa1adf43fd3127cf86ff7d4f627b9d91b26ebfe1395",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "macromolecular-substrate"
+    },
+    {
+      "accession": "P05023",
+      "name": "Sodium/potassium-transporting ATPase subunit alpha-1",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "7.2.2.13"
+      ],
+      "master_ids": [
+        "RHEA:18353"
+      ],
+      "uniprot_sha256": "3eb6f55913fbeb993cc880667ccc194a984c8d851f9e770495430d39192550e4",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "translocase"
+    },
+    {
+      "accession": "P18858",
+      "name": "DNA ligase 1",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "6.5.1.1"
+      ],
+      "master_ids": [],
+      "uniprot_sha256": "23f6b6613d93ec4caef8b329a625b202c24d5a87ffc58c317466b6ea9cf413ee",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "ligase-without-direct-Rhea"
+    },
+    {
+      "accession": "P07477",
+      "name": "Serine protease 1",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "3.4.21.4"
+      ],
+      "master_ids": [],
+      "uniprot_sha256": "8d5c3bf24dff20893a62c42750c5c121d036569f64ac0b3852b2e88a8c77928e",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "protein-substrate"
+    },
+    {
+      "accession": "P0A799",
+      "name": "Phosphoglycerate kinase",
+      "taxon_id": 83333,
+      "reviewed": true,
+      "ec": [
+        "2.7.2.3"
+      ],
+      "master_ids": [
+        "RHEA:14801"
+      ],
+      "uniprot_sha256": "33400b8bcb1669777dbc39fa37cbd23b8e3a659aa8e46f7394cc3c1cda834846",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "bacterial"
+    },
+    {
+      "accession": "P11142",
+      "name": "Heat shock cognate 71 kDa protein",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "3.6.4.10"
+      ],
+      "master_ids": [
+        "RHEA:13065"
+      ],
+      "uniprot_sha256": "22d2939ac646a1a1c6a296d50191a727cde2d31f426dc5afb63738a646239772",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "ATPase"
+    },
+    {
+      "accession": "P01112",
+      "name": "GTPase HRas",
+      "taxon_id": 9606,
+      "reviewed": true,
+      "ec": [
+        "3.6.5.2"
+      ],
+      "master_ids": [
+        "RHEA:19669"
+      ],
+      "uniprot_sha256": "84130245d668825468021c4550a21acbc7d41fefe306600f5a7f2376e0d869fb",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "GTPase"
+    },
+    {
+      "accession": "A0A024QG36",
+      "name": "Catalase",
+      "taxon_id": 61016,
+      "reviewed": false,
+      "ec": [
+        "1.11.1.6"
+      ],
+      "master_ids": [
+        "RHEA:20309"
+      ],
+      "uniprot_sha256": "415656e6de2a37d571798523b0eb5ea81ffb54b285b563cd6a5cec2bf6360a03",
+      "verification": "Live official UniProt REST JSON 2026-11-02",
+      "tag": "unreviewed-TrEMBL"
+    }
+  ]
+}
