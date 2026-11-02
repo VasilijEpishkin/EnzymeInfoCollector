@@ -31,7 +31,6 @@ class Phase2EvidenceTests(unittest.TestCase):
                                "evidences": [{"evidenceCode": "ECO:0000305"}]},
                               {"directionType": "right-to-left",
                                "reactionCrossReference": {"database": "Rhea", "id": "RHEA:14803"}}]}]}
-        ]
         raw = json.dumps(source).encode("utf-8")
         sha = hashlib.sha256(raw).hexdigest()
         def assertion(number, direction, evidence):
