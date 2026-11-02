@@ -70,3 +70,7 @@ a source annotation with proof of an enzyme's activity.
    official Rhea SPARQL result bindings; no textual-equation parsing.
    This checks reported CHEBI IDs, not experimentally validated chemical
    structures or inferred physiological reaction direction.
+
+## Phase 3: name/EC-first user journeys
+
+See [PHASE3.md](PHASE3.md) for the bounded runner and [reports/2026-11-02-phase3.md](reports/2026-11-02-phase3.md) for measured pass vs inconclusive outcomes. This does not claim a completed 7-case benchmark when upstream APIs return 503/time out.
