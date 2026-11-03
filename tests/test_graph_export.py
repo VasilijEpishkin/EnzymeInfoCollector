@@ -153,6 +153,46 @@ class EvidenceGraphTests(unittest.TestCase):
         self.assertEqual(json.loads(values["semantics"])["unknown_is_not_negative"], True)
         self.assertEqual(json.loads(values["scope"]), {"protein": "P04040"})
 
+    def test_every_node_and_edge_roundtrips_with_discovery_provenance(self):
+        # GraphML has string attributes; decimal coefficient "1" stays a string.
+        item = reference()
+        item["semantic_sha256"] = "b" * 64
+        item["provenance"]["discovery"] = {
+            "request": {"kind": "ec", "input": "1.11.1.6"},
+            "selection": {"truncated": True, "selected": [{"accession": "P04040"}]},
+        }
+        graph = json.loads(graph_json(project_graph(item, protein="P04040")))
+        xml = ET.fromstring(to_graphml(graph))
+        ns = "{http://graphml.graphdrawing.org/xmlns}"
+        keys = {e.attrib["id"]: e.attrib.get("attr.name")
+                for e in xml.findall(ns + "key")}
+        graph_element = xml.find(ns + "graph")
+        meta = {keys[e.attrib["key"]]: e.text
+                for e in graph_element.findall(ns + "data")}
+        self.assertEqual(json.loads(meta["provenance"]), graph["provenance"])
+        self.assertEqual(json.loads(meta["scope"]), graph["scope"])
+        self.assertEqual(meta["reference_sha256"], "b" * 64)
+        self.assertTrue(json.loads(meta["provenance"])["discovery"]["selection"]["truncated"])
+        for kind in ("node", "edge"):
+            by_id = {e.attrib["id"]: e for e in graph_element.findall(ns + kind)}
+            expected = {e["data"]["id"]: e["data"]
+                        for e in graph["elements"][kind + "s"]}
+            self.assertEqual(set(by_id), set(expected))
+            for identifier, entry in expected.items():
+                element = by_id[identifier]
+                if kind == "edge":
+                    self.assertEqual(element.attrib["source"], entry["source"])
+                    self.assertEqual(element.attrib["target"], entry["target"])
+                raw = {keys[e.attrib["key"]]: e.text
+                       for e in element.findall(ns + "data")}
+                for key, value in entry.items():
+                    if key in ("id", "source", "target"):
+                        continue
+                    text = raw[key]
+                    decoded = (text if isinstance(value, str)
+                               else json.loads(text) if text is not None else None)
+                    self.assertEqual(decoded, value, (kind, identifier, key))
+
     def test_graph_json_stable_across_equivalent_record_order(self):
         one = reference()
         two = deepcopy(one)
