@@ -13,3 +13,7 @@ Maximum is 7. This **does perform external HTTP** and is not part of default CI.
 UniProt candidate ordering is non-authoritative; an unexpected candidate is selection_drift, not a false biological finding. HTTP 503/timeout is upstream_failure, not zero activity. The known absence of numeric direct Rhea annotations in pig amylase must produce an explicit failure without an output file. An ambiguous name must not select a random EC. The benchmarking script distinguishes pass, selection_drift, source_drift, upstream_failure, invalid_output, mismatch, unexpected_error.
 
 Remaining work: live verification of all seven scenarios as API health permits, independent interpretation of ExPASy names, and user evaluation of non-singleton searches. No additional database, dependencies, or alteration to canonical protein–reaction assertions.
+
+## Follow-up live verification (2026-11-03)
+
+See [reports/2026-11-03-discovery-followup.md](reports/2026-11-03-discovery-followup.md) for real former-HTTP-503 reruns, documented Na/K-ATPase candidate selection drift, EC=1.1.1.1 truncation, taxon exact/descendants, ExPASy transfer/deletion cases, GraphML/Cytoscape provenance equivalence and unsupported/no-direct failures. No new global biological accuracy claim.
