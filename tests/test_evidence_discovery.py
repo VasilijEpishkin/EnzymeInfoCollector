@@ -180,6 +180,12 @@ class DiscoveryTests(unittest.TestCase):
                    return_value=[{**active, "status": "transferred"}]):
             with self.assertRaisesRegex(DataSourceError, "transferred"):
                 resolve_ec(cache, enzyme="Catalase")
+        with patch("enzymeinfocollector.evidence_discovery.parse_enzyme_dat", return_value=[active]), \
+             patch("enzymeinfocollector.evidence_discovery.find_enzyme_entries",
+                   return_value=[{**active, "status": "deleted"}]):
+            with self.assertRaisesRegex(DataSourceError, "deleted"):
+                resolve_ec(cache, enzyme="Catalase")
+
 
     def test_ec_is_classification_only_two_direct_masters_not_cartesian(self):
         cache = SearchCache()
