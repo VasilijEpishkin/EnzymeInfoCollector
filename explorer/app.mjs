@@ -2,8 +2,9 @@ import { MAX_FILE_BYTES, validateGraph, searchWithFilters, proteinFilterReason, 
 
 const $ = (id) => document.getElementById(id);
 const controls = ["search","depth","node-limit","filter-catalysis","filter-participants",
-                  "filter-reviewed","taxon-id","ec-number","eco","fit","export"];
+                  "filter-reviewed","taxon-id","ec-number","eco","fit","export","toggle-table"];
 let graph = null, cy = null, rootId = null, selectedId = null, visible = null, filename = "graph";
+let tableMode = false;
 
 function el(tag, cls, value) {
   const node = document.createElement(tag);
@@ -214,6 +215,54 @@ function selectElement(id) {
   selectedId = id;
   inspect(element.data(),element.isEdge());
 }
+function detailButton(elementId) {
+  const button = el("button","inline","Детали");
+  button.type = "button";
+  button.addEventListener("click",() => {
+    selectElement(elementId);
+    $("inspector-content").focus();
+  });
+  return button;
+}
+function tableCell(row, value) {
+  const td = el("td","",value == null || value === "" ? "не указано" : value);
+  row.append(td);
+  return td;
+}
+function renderTable() {
+  const nodeBody = $("nodes-body"), relationBody = $("relations-body");
+  nodeBody.replaceChildren(); relationBody.replaceChildren();
+  if (!visible) return;
+  for (const item of visible.nodes) {
+    const data = item.data, row = el("tr");
+    tableCell(row,data.node_type); tableCell(row,data.id); tableCell(row,data.label);
+    const action = el("td"); action.append(detailButton(data.id)); row.append(action);
+    nodeBody.append(row);
+  }
+  for (const item of visible.edges) {
+    const data = item.data, row = el("tr");
+    tableCell(row,data.relation); tableCell(row,data.source); tableCell(row,data.target);
+    let details;
+    if (data.relation === "CATALYZES") {
+      details = (Array.isArray(data.evidence) ? data.evidence : []).map(proof => {
+        const citations = Array.isArray(proof?.citation_ids) ? proof.citation_ids.join(", ") : "";
+        return [data.rhea_directional_id,proof?.eco_code || "ECO не указан",citations].filter(Boolean).join(" · ");
+      }).join("; ") || "Нет сведений об ECO/публикации";
+    } else {
+      details = [data.reported_chebi_id,data.side || "сторона неизвестна",
+        data.coefficient == null ? "коэффициент неизвестен" : String(data.coefficient)].join(" · ");
+    }
+    tableCell(row,details);
+    const action = el("td"); action.append(detailButton(data.id)); row.append(action);
+    relationBody.append(row);
+  }
+  if (!visible.edges.length) {
+    const row = el("tr");
+    const cell = el("td","","В этой области нет видимых связей. Не означает отсутствия активности.");
+    cell.colSpan = 5; row.append(cell); relationBody.append(row);
+  }
+}
+
 function render() {
   if (!graph || !rootId) return;
   filterNotice(null);
@@ -236,9 +285,11 @@ function render() {
     if (selectedId && viewer.getElementById(selectedId).nonempty()) selectElement(selectedId);
     else selectElement(rootId);
     searchResults();
+    renderTable();
   } catch (error) {
     if (cy) cy.elements().remove(); // Never retain an old, misleading view.
     visible = null;
+    renderTable();
     $("empty-state").hidden = false;
     $("focus-title").textContent = "Нет связей по выбранным фильтрам";
     $("graph-count").textContent = "0 узлов · 0 связей";
@@ -279,6 +330,7 @@ async function load(data,name,isDemo) {
   for (const id of controls) $(id).disabled = !rootId;
   if (rootId) render();
   else {
+    visible = null; renderTable();
     $("empty-state").hidden = false;
     $("focus-title").textContent = "Граф пуст";
     status("Файл корректен, но не содержит узлов.");
@@ -315,6 +367,13 @@ $("demo").addEventListener("click",async () => {
   }
 });
 $("search").addEventListener("input",searchResults);
+$("toggle-table").addEventListener("click",() => {
+  tableMode = !tableMode;
+  $("table-view").hidden = !tableMode;
+  $("toggle-table").textContent = tableMode ? "Граф" : "Таблица связей";
+  $("toggle-table").setAttribute("aria-pressed",String(tableMode));
+  if (!tableMode && cy) { cy.resize(); cy.fit(undefined,45); }
+});
 $("reset-filters").addEventListener("click",() => {
   $("depth").value = "2"; $("node-limit").value = "80";
   $("filter-catalysis").checked = true; $("filter-participants").checked = true;
