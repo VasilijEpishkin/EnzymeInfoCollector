@@ -186,6 +186,8 @@ def render_report(reference: Mapping[str, Any], *, accession: str | None = None)
                     str(row.get("annotation_id") or ""))
         for assertion in sorted(assertions, key=key):
             record = _object(assertion, "assertion")
+            if record.get("accession") != acc:
+                raise DataSourceError(f"Direct assertion accession disagrees with protein: {acc}")
             variant = _object(record.get("reaction"), "assertion.reaction")
             master = _id(variant.get("master_id"), _RHEA, "master Rhea ID")
             directional = _id(variant.get("rhea_id"), _RHEA, "directional Rhea ID")
@@ -226,6 +228,11 @@ def render_report(reference: Mapping[str, Any], *, accession: str | None = None)
                 primary = m.get("primary_chebi_id")
                 if primary is not None:
                     _id(primary, _CHEBI, "primary ChEBI")
+                state = m.get("resolution_status")
+                if (primary is None and state != "unresolved") or (
+                    primary is not None and state != "resolved"
+                ):
+                    raise DataSourceError(f"Conflicting ChEBI resolution status: {reported}")
                 compound = compounds.get(primary) if primary is not None else None
                 if primary and compound is None:
                     raise DataSourceError(f"Resolved ChEBI record absent: {primary}")
