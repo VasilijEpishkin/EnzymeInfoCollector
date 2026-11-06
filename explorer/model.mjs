@@ -80,9 +80,9 @@ export function validateGraph(document) {
   };
 }
 
-export function searchNodes(graph, phrase) {
+function matchingNodes(graph, phrase) {
   const query = String(phrase || "").trim().toLowerCase();
-  if (!query) return graph.elements.nodes.slice(0, 40);
+  if (!query) return graph.elements.nodes;
   const directionalHits = new Set();
   for (const edge of graph.elements.edges) {
     if (String(edge.data.rhea_directional_id || "").toLowerCase().includes(query)) {
@@ -95,7 +95,31 @@ export function searchNodes(graph, phrase) {
     return directionalHits.has(data.id) || candidates.some(
       (candidate) => typeof candidate === "string" && candidate.toLowerCase().includes(query)
     );
-  }).slice(0, 80);
+  });
+}
+
+export function searchNodes(graph, phrase) {
+  return matchingNodes(graph, phrase).slice(0, phrase ? 80 : 40);
+}
+
+/** Explain which protein-only filter excluded a node, without implying inactivity. */
+export function proteinFilterReason(data, options = {}) {
+  if (!data || data.node_type !== "Protein") return null;
+  const taxon = String(options.taxonId ?? "").trim();
+  const ec = String(options.ecNumber || "").trim().toLowerCase().replace(/^ec[ :]+/, "");
+  if (options.reviewedOnly === true && data.reviewed !== true) return "Reviewed";
+  if (taxon && String(data.taxon_id ?? "") !== taxon) return "таксону";
+  if (ec && !(Array.isArray(data.ec_numbers) && data.ec_numbers.some(
+    value => String(value).toLowerCase() === ec))) return "EC";
+  return null;
+}
+
+/** Search results and their filter status, prior to the UI's 80-result cap. */
+export function searchWithFilters(graph, phrase, options = {}) {
+  const all = matchingNodes(graph, phrase);
+  const visible = all.filter(({data}) => !proteinFilterReason(data, options));
+  return {nodes: visible.slice(0, 80), total: all.length,
+    hidden: all.length - visible.length, truncated: visible.length > 80};
 }
 
 export function neighborhood(graph, rootId, options = {}) {
@@ -114,12 +138,8 @@ export function neighborhood(graph, rootId, options = {}) {
     "Введите EC в формате 1.11.1.6.");
   const acceptedNode = (nodeId) => {
     const data = byId.get(nodeId)?.data;
-    if (!data) return false;
-    if (data.node_type !== "Protein") return true;
-    return (!reviewedOnly || data.reviewed === true)
-      && (!taxonId || String(data.taxon_id ?? "") === taxonId)
-      && (!ecNumber || (Array.isArray(data.ec_numbers) && data.ec_numbers.some(
-        (assigned) => String(assigned).toLowerCase() === ecNumber)));
+    return Boolean(data) && !proteinFilterReason(data,
+      { reviewedOnly, taxonId, ecNumber });
   };
   assert(acceptedNode(rootId), "Выбранный белок не соответствует фильтрам Reviewed / taxon / EC.");
   const eligible = graph.elements.edges.filter(({ data }) => {
