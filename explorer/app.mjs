@@ -1,4 +1,4 @@
-import { MAX_FILE_BYTES, validateGraph, searchNodes, neighborhood, subgraph, discoveryNotices } from "./model.mjs";
+import { MAX_FILE_BYTES, validateGraph, searchWithFilters, proteinFilterReason, neighborhood, subgraph, discoveryNotices } from "./model.mjs";
 
 const $ = (id) => document.getElementById(id);
 const controls = ["search","depth","node-limit","filter-catalysis","filter-participants",
@@ -12,6 +12,19 @@ function el(tag, cls, value) {
   return node;
 }
 function status(text) { $("load-status").textContent = text; }
+function filterNotice(message) {
+  $("filter-notice").hidden = !message;
+  $("filter-message").textContent = message || "";
+}
+function datasetNotices() {
+  const list = $("dataset-notice-list");
+  list.replaceChildren();
+  const notices = discoveryNotices(graph);
+  if (graph && graph.provenance.dataset_type !== "synthetic-demo")
+    notices.push("Время получения и SHA исходных ответов не гарантируют наличие архивных релизов всех баз.");
+  for (const note of notices) list.append(el("li","",note));
+  $("dataset-notices").hidden = !notices.length;
+}
 function linkFor(value) {
   if (typeof value !== "string") return null;
   if (/^[A-Z0-9]+(?:-[0-9]+)?$/.test(value))
@@ -136,8 +149,11 @@ function options() {
 function searchResults() {
   const list = $("search-results"); list.replaceChildren();
   if (!graph) return;
-  const rows = searchNodes(graph,$("search").value);
-  $("results-count").textContent = "Найдено: " + rows.length + (rows.length === 80 ? "+" : "");
+  const hits = searchWithFilters(graph,$("search").value,options());
+  const rows = hits.nodes;
+  $("results-count").textContent = "Показано: " + rows.length +
+    (hits.truncated ? "+ (лимит 80)" : "") +
+    (hits.hidden ? " · скрыто фильтрами: " + hits.hidden : "");
   const labels = {Protein:"Белок",Reaction:"Реакция",Compound:"Соединение",UnresolvedCompound:"Не разрешено"};
   for (const entry of rows) {
     const d = entry.data;
@@ -151,7 +167,9 @@ function searchResults() {
     button.addEventListener("click",() => {rootId = d.id; selectedId = d.id; render();});
     list.append(button);
   }
-  if (!rows.length) list.append(el("p","hint","Ничего не найдено в загруженном графе."));
+  if (!rows.length) list.append(el("p","hint",
+    hits.total ? "Совпадения в файле есть, но скрыты настройками. Сбросьте фильтры."
+      : "Совпадений в загруженном файле нет. Это не отрицательный биологический результат."));
 }
 function styles() {
   return [
@@ -198,6 +216,7 @@ function selectElement(id) {
 }
 function render() {
   if (!graph || !rootId) return;
+  filterNotice(null);
   try {
     visible = neighborhood(graph,rootId,options());
     const viewer = ensureRenderer();
@@ -206,6 +225,9 @@ function render() {
     viewer.layout({name:"cose",animate:false,fit:true,padding:40,randomize:false,numIter:300,
       nodeRepulsion:() => 450000,idealEdgeLength:() => 95}).run();
     $("empty-state").hidden = true;
+    if (!visible.edges.length)
+      filterNotice("В выбранной области нет видимых связей по заданным фильтрам. " +
+        "Это не доказывает отсутствие ферментативной активности. Можно сбросить фильтры.");
     $("focus-title").textContent = rootId;
     $("graph-count").textContent = "Узлов: " + visible.nodes.length + " · связей: " + visible.edges.length;
     status(graph.elements.nodes.length + " узлов в файле · показано " + visible.nodes.length +
@@ -221,7 +243,18 @@ function render() {
     $("focus-title").textContent = "Нет связей по выбранным фильтрам";
     $("graph-count").textContent = "0 узлов · 0 связей";
     inspect(null,false);
-    status("Ошибка фильтра: " + error.message);
+    const root = graph.elements.nodes.find((node) => node.data.id === rootId)?.data;
+    const reason = proteinFilterReason(root,options());
+    filterNotice(reason ?
+      "Выбранный белок " + rootId + " исключён фильтром «" + reason +
+        "». Сбросьте фильтры, чтобы восстановить граф." :
+      "Не удалось построить выбранную область: " + error.message +
+        ". Проверьте фильтры или сбросьте их.");
+    $("empty-state").querySelector("h3").textContent = "Область скрыта фильтрами";
+    $("empty-state").querySelector("p").textContent =
+      "Измените настройки или воспользуйтесь кнопкой сброса. Сведения об активности не удалены.";
+    searchResults();
+    status("Невозможно отобразить выбранную область: " + error.message);
   }
 }
 async function load(data,name,isDemo) {
@@ -234,6 +267,8 @@ async function load(data,name,isDemo) {
   $("depth").value = "2"; $("node-limit").value = "80";
   $("filter-catalysis").checked = true; $("filter-participants").checked = true;
   $("filter-reviewed").checked = false;
+  filterNotice(null);
+  datasetNotices();
   const directlyLinked = new Set(graph.elements.edges
     .filter((edge) => edge.data.relation === "CATALYZES").map((edge) => edge.data.source));
   rootId = graph.elements.nodes.find((n) =>
@@ -263,7 +298,10 @@ $("file-input").addEventListener("change",async (event) => {
     if (file.size > MAX_FILE_BYTES)
       throw new Error("Файл больше 8 МБ; экспортируйте небольшой граф.");
     await load(JSON.parse(await file.text()),file.name,false);
-  } catch (error) { status("Не удалось открыть файл: " + error.message); }
+  } catch (error) {
+    status("Не удалось открыть файл «" + file.name + "»: " + error.message +
+      (graph ? ". Ранее загруженный набор «" + $("dataset-name").textContent + "» сохранён." : ""));
+  }
   event.target.value = "";
 });
 $("demo").addEventListener("click",async () => {
@@ -271,9 +309,21 @@ $("demo").addEventListener("click",async () => {
     const response = await fetch("./demo.json",{cache:"no-store"});
     if (!response.ok) throw new Error("Демо-файл не найден.");
     await load(await response.json(),"demo.json",true);
-  } catch (error) { status("Ошибка демо: " + error.message); }
+  } catch (error) {
+    status("Ошибка демо: " + error.message +
+      (graph ? ". Предыдущий граф остаётся открытым." : ""));
+  }
 });
 $("search").addEventListener("input",searchResults);
+$("reset-filters").addEventListener("click",() => {
+  $("depth").value = "2"; $("node-limit").value = "80";
+  $("filter-catalysis").checked = true; $("filter-participants").checked = true;
+  $("filter-reviewed").checked = false; $("taxon-id").value = "";
+  $("ec-number").value = ""; $("eco").value = "";
+  filterNotice(null);
+  render();
+  searchResults();
+});
 for (const id of ["depth","node-limit","filter-catalysis","filter-participants",
                    "filter-reviewed","taxon-id","ec-number","eco"]) {
   $(id).addEventListener(["eco","taxon-id","ec-number"].includes(id) ? "input" : "change",render);
