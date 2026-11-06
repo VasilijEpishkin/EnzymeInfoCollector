@@ -35,6 +35,15 @@ license notice.
   visible edges. The UI never attempts to draw the entire supplied graph.
 - Filter by relation type, curated (reviewed) proteins and ECO code on
   catalytic edges. Missing ECO is unknown rather than negative evidence.
+- Switch between the canvas and a keyboard-operable **evidence table** showing the
+  same bounded nodes and edges; each row opens the existing inspector for ECO,
+  citations, Rhea sides/coefficients and provenance.
+- Search lists distinguish no match in the local file from proteins hidden by
+  reviewed/taxon/EC filters; filtering out the focused protein shows an explanation
+  and a **Reset filters** action instead of suggesting a negative scientific result.
+- Discovery truncation/unknown evidence and local source snapshot limitations
+  are shown in a persistent text notice; malformed JSON imports preserve the
+  previously loaded dataset and explain which file remains on screen.
 - Inspect node attributes, Rhea stoichiometry and equation sides, evidence
   codes, PubMed citations and upstream release/provenance.
 - Source links are generated **only** for validated UniProt, Rhea, ChEBI
@@ -74,8 +83,9 @@ node --check explorer/app.mjs
 
 GitHub Actions executes the model tests under Node.js 22 separately from
 the existing Python 3.11/3.13 suite. The Node tests are network-free.
-An additional **headless Chrome UI smoke test** loads the synthetic demo and
-checks that all five nodes/four edges render in the browser. That smoke check
+An additional **headless Chrome UI smoke test** loads the synthetic demo, checks
+five nodes/four edges, opens the evidence table, exercises incompatible filter
+recovery and rejects an invalid JSON import without replacing the loaded dataset. That smoke check
 downloads the pinned Cytoscape.js script from its CDN.
 
 Interactive desktop/mobile review with real user-selected JSON files and
