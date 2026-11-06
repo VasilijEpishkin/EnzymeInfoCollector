@@ -89,12 +89,33 @@
             <h2 id="focus-title">Выберите узел</h2>
           </div>
           <div class="canvas-actions">
+            <button id="toggle-table" class="small-button" type="button" aria-pressed="false" disabled>Таблица связей</button>
             <button id="fit" class="small-button" type="button" disabled>Вписать</button>
             <button id="export" class="small-button strong-button" type="button" disabled>Экспорт подграфа</button>
           </div>
         </div>
         <div class="graph-holder">
           <div id="graph" aria-label="Интерактивная схема связей" role="application"></div>
+          <section id="table-view" class="table-view" aria-label="Табличный просмотр подграфа" hidden>
+            <h3>Узлы в выбранной области</h3>
+            <p>Выберите «Детали», чтобы открыть карточку с источниками и аннотациями.</p>
+            <div class="table-scroll">
+              <table>
+                <caption>Узлы текущего подграфа</caption>
+                <thead><tr><th scope="col">Тип</th><th scope="col">Идентификатор</th><th scope="col">Название</th><th scope="col">Действие</th></tr></thead>
+                <tbody id="nodes-body"></tbody>
+              </table>
+            </div>
+            <h3>Связи и доказательства</h3>
+            <p>CATALYZES — только прямые UniProt-аннотации. HAS_PARTICIPANT — участник уравнения Rhea.</p>
+            <div class="table-scroll">
+              <table>
+                <caption>Связи текущего подграфа</caption>
+                <thead><tr><th scope="col">Связь</th><th scope="col">Откуда</th><th scope="col">Куда</th><th scope="col">ECO / PMID или участник Rhea</th><th scope="col">Действие</th></tr></thead>
+                <tbody id="relations-body"></tbody>
+              </table>
+            </div>
+          </section>
           <div id="empty-state" class="empty">
             <div class="empty-graphic" aria-hidden="true"><span></span><span></span><span></span></div>
             <h3>Готов к исследованию</h3>
@@ -114,7 +135,7 @@
 
       <aside class="inspector" aria-label="Детали выбранной записи">
         <div class="section-heading"><h2>Карточка данных</h2><span class="micro">03</span></div>
-        <div id="inspector-content" class="inspector-content">
+        <div id="inspector-content" class="inspector-content" role="region" aria-live="polite" aria-atomic="false">
           <p class="placeholder">Выберите узел или ребро графа для просмотра источников, доказательств и идентификаторов.</p>
         </div>
       </aside>
