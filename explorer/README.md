@@ -47,6 +47,21 @@ from \`graph_cli\`. No inferred catalysis edges are introduced by a shared EC
 number. It does not claim that Rhea left/right is a biological substrate/
 product distinction.
 
+## Usability and accessibility (first product iteration)
+
+- The **Таблица связей** toggle shows semantic HTML tables of the **same bounded**
+  nodes and edges as the canvas. Each row has a keyboard-usable **Детали**
+  action that opens the existing evidence/provenance inspector. It does not
+  expand the graph or infer any additional catalysis links.
+- Search distinguishes missing local matches from protein records excluded
+  by Reviewed, exact taxon or EC filters; an excluded current root and
+  zero-edge neighborhoods present an explicit reset action and do not imply
+  biological inactivity.
+- Discovery truncation and proteins without direct Rhea annotations appear
+  in a separate limitations notice. Bad imports keep the previously loaded
+  graph and identify it as the retained dataset.
+- Graph canvas navigation remains mouse/touch oriented. Keyboard users
+  should use the table view, search, filters, inspector and subgraph export.
 ## Limitations
 
 - Only current \`2.0-graph-preview\` Cytoscape JSON is supported. The

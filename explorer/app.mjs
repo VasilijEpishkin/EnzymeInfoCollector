@@ -1,9 +1,10 @@
-import { MAX_FILE_BYTES, validateGraph, searchNodes, neighborhood, subgraph, discoveryNotices } from "./model.mjs";
+import { MAX_FILE_BYTES, validateGraph, searchWithFilters, proteinFilterReason, neighborhood, subgraph, discoveryNotices } from "./model.mjs";
 
 const $ = (id) => document.getElementById(id);
 const controls = ["search","depth","node-limit","filter-catalysis","filter-participants",
-                  "filter-reviewed","taxon-id","ec-number","eco","fit","export"];
+                  "filter-reviewed","taxon-id","ec-number","eco","fit","export","toggle-table"];
 let graph = null, cy = null, rootId = null, selectedId = null, visible = null, filename = "graph";
+let tableMode = false;
 
 function el(tag, cls, value) {
   const node = document.createElement(tag);
@@ -12,6 +13,19 @@ function el(tag, cls, value) {
   return node;
 }
 function status(text) { $("load-status").textContent = text; }
+function filterNotice(message) {
+  $("filter-notice").hidden = !message;
+  $("filter-message").textContent = message || "";
+}
+function datasetNotices() {
+  const list = $("dataset-notice-list");
+  list.replaceChildren();
+  const notices = discoveryNotices(graph);
+  if (graph && graph.provenance.dataset_type !== "synthetic-demo")
+    notices.push("Время получения и SHA исходных ответов не гарантируют наличие архивных релизов всех баз.");
+  for (const note of notices) list.append(el("li","",note));
+  $("dataset-notices").hidden = !notices.length;
+}
 function linkFor(value) {
   if (typeof value !== "string") return null;
   if (/^[A-Z0-9]+(?:-[0-9]+)?$/.test(value))
@@ -136,8 +150,11 @@ function options() {
 function searchResults() {
   const list = $("search-results"); list.replaceChildren();
   if (!graph) return;
-  const rows = searchNodes(graph,$("search").value);
-  $("results-count").textContent = "Найдено: " + rows.length + (rows.length === 80 ? "+" : "");
+  const hits = searchWithFilters(graph,$("search").value,options());
+  const rows = hits.nodes;
+  $("results-count").textContent = "Показано: " + rows.length +
+    (hits.truncated ? "+ (лимит 80)" : "") +
+    (hits.hidden ? " · скрыто фильтрами: " + hits.hidden : "");
   const labels = {Protein:"Белок",Reaction:"Реакция",Compound:"Соединение",UnresolvedCompound:"Не разрешено"};
   for (const entry of rows) {
     const d = entry.data;
@@ -151,7 +168,9 @@ function searchResults() {
     button.addEventListener("click",() => {rootId = d.id; selectedId = d.id; render();});
     list.append(button);
   }
-  if (!rows.length) list.append(el("p","hint","Ничего не найдено в загруженном графе."));
+  if (!rows.length) list.append(el("p","hint",
+    hits.total ? "Совпадения в файле есть, но скрыты настройками. Сбросьте фильтры."
+      : "Совпадений в загруженном файле нет. Это не отрицательный биологический результат."));
 }
 function styles() {
   return [
@@ -196,8 +215,57 @@ function selectElement(id) {
   selectedId = id;
   inspect(element.data(),element.isEdge());
 }
+function detailButton(elementId) {
+  const button = el("button","inline","Детали");
+  button.type = "button";
+  button.addEventListener("click",() => {
+    selectElement(elementId);
+    $("inspector-content").focus();
+  });
+  return button;
+}
+function tableCell(row, value) {
+  const td = el("td","",value == null || value === "" ? "не указано" : value);
+  row.append(td);
+  return td;
+}
+function renderTable() {
+  const nodeBody = $("nodes-body"), relationBody = $("relations-body");
+  nodeBody.replaceChildren(); relationBody.replaceChildren();
+  if (!visible) return;
+  for (const item of visible.nodes) {
+    const data = item.data, row = el("tr");
+    tableCell(row,data.node_type); tableCell(row,data.id); tableCell(row,data.label);
+    const action = el("td"); action.append(detailButton(data.id)); row.append(action);
+    nodeBody.append(row);
+  }
+  for (const item of visible.edges) {
+    const data = item.data, row = el("tr");
+    tableCell(row,data.relation); tableCell(row,data.source); tableCell(row,data.target);
+    let details;
+    if (data.relation === "CATALYZES") {
+      details = (Array.isArray(data.evidence) ? data.evidence : []).map(proof => {
+        const citations = Array.isArray(proof?.citation_ids) ? proof.citation_ids.join(", ") : "";
+        return [data.rhea_directional_id,proof?.eco_code || "ECO не указан",citations].filter(Boolean).join(" · ");
+      }).join("; ") || "Нет сведений об ECO/публикации";
+    } else {
+      details = [data.reported_chebi_id,data.side || "сторона неизвестна",
+        data.coefficient == null ? "коэффициент неизвестен" : String(data.coefficient)].join(" · ");
+    }
+    tableCell(row,details);
+    const action = el("td"); action.append(detailButton(data.id)); row.append(action);
+    relationBody.append(row);
+  }
+  if (!visible.edges.length) {
+    const row = el("tr");
+    const cell = el("td","","В этой области нет видимых связей. Не означает отсутствия активности.");
+    cell.colSpan = 5; row.append(cell); relationBody.append(row);
+  }
+}
+
 function render() {
   if (!graph || !rootId) return;
+  filterNotice(null);
   try {
     visible = neighborhood(graph,rootId,options());
     const viewer = ensureRenderer();
@@ -206,6 +274,9 @@ function render() {
     viewer.layout({name:"cose",animate:false,fit:true,padding:40,randomize:false,numIter:300,
       nodeRepulsion:() => 450000,idealEdgeLength:() => 95}).run();
     $("empty-state").hidden = true;
+    if (!visible.edges.length)
+      filterNotice("В выбранной области нет видимых связей по заданным фильтрам. " +
+        "Это не доказывает отсутствие ферментативной активности. Можно сбросить фильтры.");
     $("focus-title").textContent = rootId;
     $("graph-count").textContent = "Узлов: " + visible.nodes.length + " · связей: " + visible.edges.length;
     status(graph.elements.nodes.length + " узлов в файле · показано " + visible.nodes.length +
@@ -214,14 +285,27 @@ function render() {
     if (selectedId && viewer.getElementById(selectedId).nonempty()) selectElement(selectedId);
     else selectElement(rootId);
     searchResults();
+    renderTable();
   } catch (error) {
     if (cy) cy.elements().remove(); // Never retain an old, misleading view.
     visible = null;
+    renderTable();
     $("empty-state").hidden = false;
     $("focus-title").textContent = "Нет связей по выбранным фильтрам";
     $("graph-count").textContent = "0 узлов · 0 связей";
     inspect(null,false);
-    status("Ошибка фильтра: " + error.message);
+    const root = graph.elements.nodes.find((node) => node.data.id === rootId)?.data;
+    const reason = proteinFilterReason(root,options());
+    filterNotice(reason ?
+      "Выбранный белок " + rootId + " исключён фильтром «" + reason +
+        "». Сбросьте фильтры, чтобы восстановить граф." :
+      "Не удалось построить выбранную область: " + error.message +
+        ". Проверьте фильтры или сбросьте их.");
+    $("empty-state").querySelector("h3").textContent = "Область скрыта фильтрами";
+    $("empty-state").querySelector("p").textContent =
+      "Измените настройки или воспользуйтесь кнопкой сброса. Сведения об активности не удалены.";
+    searchResults();
+    status("Невозможно отобразить выбранную область: " + error.message);
   }
 }
 async function load(data,name,isDemo) {
@@ -234,6 +318,8 @@ async function load(data,name,isDemo) {
   $("depth").value = "2"; $("node-limit").value = "80";
   $("filter-catalysis").checked = true; $("filter-participants").checked = true;
   $("filter-reviewed").checked = false;
+  filterNotice(null);
+  datasetNotices();
   const directlyLinked = new Set(graph.elements.edges
     .filter((edge) => edge.data.relation === "CATALYZES").map((edge) => edge.data.source));
   rootId = graph.elements.nodes.find((n) =>
@@ -244,6 +330,7 @@ async function load(data,name,isDemo) {
   for (const id of controls) $(id).disabled = !rootId;
   if (rootId) render();
   else {
+    visible = null; renderTable();
     $("empty-state").hidden = false;
     $("focus-title").textContent = "Граф пуст";
     status("Файл корректен, но не содержит узлов.");
@@ -263,7 +350,10 @@ $("file-input").addEventListener("change",async (event) => {
     if (file.size > MAX_FILE_BYTES)
       throw new Error("Файл больше 8 МБ; экспортируйте небольшой граф.");
     await load(JSON.parse(await file.text()),file.name,false);
-  } catch (error) { status("Не удалось открыть файл: " + error.message); }
+  } catch (error) {
+    status("Не удалось открыть файл «" + file.name + "»: " + error.message +
+      (graph ? ". Ранее загруженный набор «" + $("dataset-name").textContent + "» сохранён." : ""));
+  }
   event.target.value = "";
 });
 $("demo").addEventListener("click",async () => {
@@ -271,9 +361,29 @@ $("demo").addEventListener("click",async () => {
     const response = await fetch("./demo.json",{cache:"no-store"});
     if (!response.ok) throw new Error("Демо-файл не найден.");
     await load(await response.json(),"demo.json",true);
-  } catch (error) { status("Ошибка демо: " + error.message); }
+  } catch (error) {
+    status("Ошибка демо: " + error.message +
+      (graph ? ". Предыдущий граф остаётся открытым." : ""));
+  }
 });
 $("search").addEventListener("input",searchResults);
+$("toggle-table").addEventListener("click",() => {
+  tableMode = !tableMode;
+  $("table-view").hidden = !tableMode;
+  $("graph").setAttribute("aria-hidden",String(tableMode));
+  $("toggle-table").textContent = tableMode ? "Граф" : "Таблица связей";
+  $("toggle-table").setAttribute("aria-pressed",String(tableMode));
+  if (!tableMode && cy) { cy.resize(); cy.fit(undefined,45); }
+});
+$("reset-filters").addEventListener("click",() => {
+  $("depth").value = "2"; $("node-limit").value = "80";
+  $("filter-catalysis").checked = true; $("filter-participants").checked = true;
+  $("filter-reviewed").checked = false; $("taxon-id").value = "";
+  $("ec-number").value = ""; $("eco").value = "";
+  filterNotice(null);
+  render();
+  searchResults();
+});
 for (const id of ["depth","node-limit","filter-catalysis","filter-participants",
                    "filter-reviewed","taxon-id","ec-number","eco"]) {
   $(id).addEventListener(["eco","taxon-id","ec-number"].includes(id) ? "input" : "change",render);

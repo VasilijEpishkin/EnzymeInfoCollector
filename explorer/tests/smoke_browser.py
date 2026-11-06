@@ -33,7 +33,9 @@ def main() -> None:
             marker,
             "<script>"
             "window.addEventListener('load',function(){"
-            "setTimeout(function(){document.getElementById('demo').click()},500)"
+            "setTimeout(function(){document.getElementById('demo').click();"
+            "setTimeout(function(){document.getElementById('toggle-table').click()},900)"
+            "},500)"
             "})"
             "</script>" + marker,
         )
@@ -79,6 +81,14 @@ def main() -> None:
             raise AssertionError(
                 f"Demo graph not rendered. count={shown!r}, source={source!r}, "
                 f"status={detail!r}, Chrome={result.stderr[-900:]}"
+            )
+        # The alternative table must be populated and operable without the canvas.
+        table = re.search(r'<tbody id="relations-body">(.+?)</tbody>', output, re.S)
+        pressed = re.search(r'id="toggle-table"[^>]*aria-pressed="true"', output)
+        rows = table.group(1).count("<tr") if table else 0
+        if not pressed or rows != 4 or "CATALYZES" not in table.group(1):
+            raise AssertionError(
+                f"Accessible relation table failed: pressed={bool(pressed)}, rows={rows}"
             )
         print("Headless Chrome smoke passed:", source, shown)
 

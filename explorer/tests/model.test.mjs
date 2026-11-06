@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  MAX_GRAPH_ELEMENTS, validateGraph, searchNodes, neighborhood, subgraph, discoveryNotices,
+  MAX_GRAPH_ELEMENTS, validateGraph, searchNodes, searchWithFilters,
+  proteinFilterReason, neighborhood, subgraph, discoveryNotices,
 } from "../model.mjs";
 
 const source = JSON.parse(readFileSync(new URL("../demo.json",import.meta.url),"utf8"));
@@ -159,4 +160,58 @@ test("discovery warnings show truncation and unknown direct Rhea status",() => {
   assert.match(notices[0],/усечены/);
   assert.match(notices[1],/не отрицательный результат/);
   assert.deepEqual(discoveryNotices(valid()),[]);
+});
+
+test("search distinguishes absent hits from hits hidden by protein filters",() => {
+  const graph=valid();
+  const hidden=searchWithFilters(graph,"P00001",{taxonId:"10090"});
+  assert.equal(hidden.total,1);
+  assert.equal(hidden.hidden,1);
+  assert.equal(hidden.nodes.length,0);
+  const missing=searchWithFilters(graph,"NO_SUCH_UNIPROT");
+  assert.equal(missing.total,0);
+  assert.equal(missing.hidden,0);
+  assert.equal(proteinFilterReason(graph.elements.nodes.find(n=>n.data.id==="protein:P00001").data,
+    {reviewedOnly:true}),null);
+});
+
+test("search counts all matches before limiting visible results to 80",() => {
+  const source=structuredClone(valid());
+  source.elements.nodes=Array.from({length:100},(_,i)=>({
+    data:{id:"protein:P"+String(10000+i),label:"query-match "+i,
+      node_type:"Protein", reviewed:i%2===0, ec_numbers:["1.11.1.6"]}
+  }));
+  source.elements.edges=[];
+  const many=validateGraph(source);
+  const all=searchWithFilters(many,"query-match");
+  assert.equal(all.total,100);
+  assert.equal(all.nodes.length,80);
+  assert.equal(all.truncated,true);
+  const reviewed=searchWithFilters(many,"query-match",{reviewedOnly:true});
+  assert.equal(reviewed.nodes.length,50);
+  assert.equal(reviewed.hidden,50);
+  assert.equal(reviewed.truncated,false);
+});
+
+test("filter warnings and explicit reset are present in the static interface",() => {
+  const html=readFileSync(new URL("../index.html",import.meta.url),"utf8");
+  const app=readFileSync(new URL("../app.mjs",import.meta.url),"utf8");
+  for (const id of ["dataset-notices","filter-notice","filter-message","reset-filters"]) {
+    assert.ok(html.includes('id="'+id+'"'));
+  }
+  assert.match(app,/searchWithFilters/);
+  assert.match(app,/Ранее загруженный набор/);
+});
+
+test("keyboard-friendly tables reuse scoped graph and link to inspector",() => {
+  const html=readFileSync(new URL("../index.html",import.meta.url),"utf8");
+  const app=readFileSync(new URL("../app.mjs",import.meta.url),"utf8");
+  for (const id of ["toggle-table","table-view","nodes-body","relations-body"]) {
+    assert.ok(html.includes('id="'+id+'"'));
+  }
+  assert.match(html,/<th scope="col">/);
+  assert.match(html,/id="inspector-content"[^>]+tabindex="-1"/);
+  assert.match(app,/function renderTable\(/);
+  assert.match(app,/selectElement\(elementId\)/);
+  assert.match(app,/renderTable\(\)/);
 });
