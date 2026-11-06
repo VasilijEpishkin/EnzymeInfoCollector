@@ -24,3 +24,18 @@ a{color:#7cd8f4;text-decoration:none}a:hover{text-decoration:underline}
 .filter-notice #filter-message{flex:1;min-width:260px}
 .filter-notice .small-button{color:#fff3e3;border-color:#98754b;background:#584630}
 @media(max-width:700px){.notice-strip{padding:13px 17px}.filter-notice #filter-message{min-width:0}}
+
+/* Keyboard-operable alternative to the node canvas; shares the same bounded graph data. */
+.table-view{position:absolute;inset:0;z-index:4;overflow:auto;background:#111b26;padding:19px 22px;color:#e0edf3}
+.table-view[hidden]{display:none}
+.table-view h3{margin:7px 0 8px;font-size:15px}
+.table-view p{font-size:12px;color:#b2c3cf;margin:0 0 18px;line-height:1.6}
+.table-view .table-scroll{overflow-x:auto;max-width:100%;margin-bottom:26px}
+.table-view table{border-collapse:collapse;width:100%;font-size:12px;min-width:490px}
+.table-view caption{text-align:left;color:#c0d4df;font-size:11px;margin-bottom:10px}
+.table-view th,.table-view td{padding:10px 9px;border-bottom:1px solid #314657;vertical-align:top;text-align:left;overflow-wrap:anywhere}
+.table-view th{color:#aed4e8;background:#1b2c3b;font-size:11px;position:sticky;top:0}
+.table-view tr:hover td{background:#192a38}
+.table-view button.inline{border:1px solid #365d72;background:#173445;color:#b9ebfb;padding:6px 10px;border-radius:6px;font-size:11px}
+.inspector-content:focus{outline:2px solid #86d1f7;outline-offset:4px}
+@media(max-width:700px){.table-view{padding:15px 12px}}
