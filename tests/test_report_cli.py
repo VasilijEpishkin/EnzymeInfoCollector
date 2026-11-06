@@ -138,6 +138,40 @@ class ReportTests(unittest.TestCase):
         with self.assertRaisesRegex(DataSourceError, "not in reference"):
             render_report(fixture(), accession="Z99999")
 
+    def test_real_candidate_preview_names_are_escaped_and_source_visible(self):
+        data = fixture()
+        data["provenance"]["discovery"]["selection"] = {
+            "truncated": True,
+            "selected": [{
+                "accession": "P04040",
+                "protein_name": "Catalase <img onerror=evil>",
+                "gene_names": "CAT",
+            }],
+            "source": {
+                "url": "https://rest.uniprot.org/uniprotkb/search",
+                "fetched_at": "2026-11-06T10:00:00Z",
+                "sha256": "c" * 64,
+            },
+        }
+        report = render_report(data, accession="P04040")
+        self.assertIn("Название (предпросмотр UniProt", report)
+        self.assertIn("Гены (предпросмотр UniProt): CAT", report)
+        self.assertIn("&lt;img", report)
+        self.assertNotIn("<img", report)
+        self.assertIn("Выбранные кандидаты UniProt: P04040", report)
+        self.assertIn("Снимок поиска UniProt", report)
+        self.assertIn("2026-11-06T10:00:00Z", report)
+
+    def test_cli_rejects_oversized_input_without_overwriting_output(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            inp = Path(tmp) / "oversized.json"
+            out = Path(tmp) / "report.md"
+            with inp.open("wb") as handle:
+                handle.truncate(32 * 1024 * 1024 + 1)
+            out.write_text("existing", encoding="utf-8")
+            self.assertEqual(main([str(inp), "-o", str(out)]), 1)
+            self.assertEqual(out.read_text(encoding="utf-8"), "existing")
+
     def test_cli_atomic_write_and_preserves_file_on_failure(self):
         with tempfile.TemporaryDirectory() as tmp:
             inp = Path(tmp) / "reference.json"
