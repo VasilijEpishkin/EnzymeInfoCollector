@@ -217,6 +217,40 @@ truncated=true; верхние 10 кандидатов не обязательн
 
 ## Человекочитаемый отчёт о прямых аннотациях (v2)
 
+### Быстрый путь без промежуточного JSON
+
+Если UniProt accession уже известен, одна команда выполняет запросы к
+источникам и сразу сохраняет Markdown:
+
+~~~bash
+python -m enzymeinfocollector.reference_cli --accession P04040 \\
+  --format report-md -o evidence.md
+~~~
+
+Если есть только EC/название, сначала просмотрите ограниченный список
+**кандидатов** и выберите конкретный accession. Порядок UniProt не означает
+предпочтительную каталитическую активность:
+
+~~~bash
+python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \\
+  --taxon-id 9606 --max-proteins 3 --format candidates-json -o candidates.json
+
+# Подставьте accession из selection.selected (здесь P04040 — пример).
+python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \\
+  --taxon-id 9606 --max-proteins 3 --select-accession P04040 \\
+  --format report-md -o evidence.md
+~~~
+
+Для проверки неизменности поискового ответа между просмотром и выбором
+передайте `--expected-search-sha` со значением
+`selection.source.sha256` из `candidates.json`.
+Если выбранный accession больше не присутствует среди текущих кандидатов,
+сбор прекращается. **Неполная выдача или отсутствие прямой Rhea-аннотации
+не доказывают отсутствия активности.** Эти команды работают с живыми
+источниками (или их HTTP-кэшем), поэтому требуют доступности API.
+
+### Отчёт из сохранённого JSON без HTTP
+
 Из уже сохранённого `2.0-reference-preview` JSON можно получить проверяемый
 Markdown-отчёт **без обращения к API**:
 
