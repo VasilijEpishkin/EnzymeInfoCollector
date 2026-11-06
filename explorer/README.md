@@ -8,10 +8,10 @@ no Python runtime dependency, no database and no hosted service.
 From the repository root:
 
 ~~~bash
-python -m http.server 8000 --bind 127.0.0.1
+python -m http.server 8000 --bind 127.0.0.1 --directory explorer
 ~~~
 
-Open http://127.0.0.1:8000/explorer/ in a browser. Click **Демо** for a
+Open http://127.0.0.1:8000/ in a browser. Only static explorer/ files are served; the repository root and .git/ remain outside the served directory. Click **Демо** for a
 *synthetic* sample (not a biological claim), or generate actual source data:
 
 ~~~bash
@@ -88,3 +88,5 @@ a version-pinned CDN with SHA-384 subresource integrity (SRI) checked by the
 browser, mitigating CDN content tampering. For air-gapped workflows serve a
 locally licensed copy of the same library. The CDN may still receive the
 browser's network request for that library, but not the selected JSON.
+
+**Local-serving security:** never run an unrestricted HTTP file server from the repository root when only the explorer is needed. Keep the binding at 127.0.0.1 and serve explorer/ exclusively. Python http.server is a development server, not production hosting.
