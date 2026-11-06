@@ -20,7 +20,7 @@ _SCHEMA = "2.0-reference-preview"
 _UNIPROT = re.compile(r"[A-Z0-9]+(?:-[0-9]+)?\Z")
 _RHEA = re.compile(r"RHEA:[1-9][0-9]*\Z")
 _CHEBI = re.compile(r"CHEBI:[1-9][0-9]*\Z")
-_MD = re.compile(r"([\\`*_{}\[\]()#+.!|>~-])")
+_MD = re.compile(r"([\\`*_{}\[\]()|>#!])")
 
 
 def _object(value: Any, label: str) -> Mapping[str, Any]:
