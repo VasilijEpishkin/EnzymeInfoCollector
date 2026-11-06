@@ -15,6 +15,7 @@ from pathlib import Path
 import sys
 
 from .reference_dataset import collect_live_reference, reference_json
+from .report_cli import render_report
 from .sources import DataSourceError, HttpCache, _atomic_write, default_cache_dir
 
 
@@ -25,13 +26,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--cache-dir", type=Path, default=default_cache_dir())
     parser.add_argument("--contact-email", help="Contact email for upstream User-Agent")
     parser.add_argument("--refresh", action="store_true")
+    parser.add_argument("--format", choices=("reference-json", "report-md"),
+                        default="reference-json",
+                        help="Verified reference JSON (default) or evidence Markdown report")
     parser.add_argument("-o", "--output", type=Path,
-                        help="Write complete JSON to a file instead of stdout")
+                        help="Write the selected output atomically (default: stdout)")
     args = parser.parse_args(argv)
     try:
         cache = HttpCache(args.cache_dir, contact_email=args.contact_email)
         result = collect_live_reference(args.accession, cache, refresh=args.refresh)
-        serialized = reference_json(result)
+        serialized_json = reference_json(result)
+        serialized = (render_report(json.loads(serialized_json))
+                      if args.format == "report-md" else serialized_json)
         if args.output is not None:
             _atomic_write(args.output, serialized.encode("utf-8"))
         else:
