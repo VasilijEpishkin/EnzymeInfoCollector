@@ -38,13 +38,13 @@ def fixture():
              "organism_name": "Homo sapiens", "ec_numbers": ["1.11.1.6"],
              "entry_version": 4, "sequence_version": 1, "source_release": source,
              "direct_assertions": [
-                 {"reaction": {"master_id": "RHEA:10000", "rhea_id": "RHEA:10001",
+                 {"accession": "P04040", "reaction": {"master_id": "RHEA:10000", "rhea_id": "RHEA:10001",
                                "direction": "left_to_right"},
                   "annotation_id": "synthetic:one", "source_release": source,
                   "evidence": [{"source_database": "Synthetic",
                                 "eco_code": "ECO:0000269", "assertion_method": "manual",
                                 "citation_ids": ["PubMed:111"]}]},
-                 {"reaction": {"master_id": "RHEA:10000", "rhea_id": "RHEA:10002",
+                 {"accession": "P04040", "reaction": {"master_id": "RHEA:10000", "rhea_id": "RHEA:10002",
                                "direction": "right_to_left"},
                   "annotation_id": "synthetic:two", "source_release": source,
                   "evidence": [{"source_database": "Synthetic",
@@ -115,6 +115,18 @@ class ReportTests(unittest.TestCase):
         self.assertNotIn("| [link](javascript:evil)", report)
         self.assertIn("&lt;script", report)
         self.assertIn(r"\|", report)
+
+    def test_mismatched_assertion_accession_fails_closed(self):
+        data = fixture()
+        data["proteins"][1]["direct_assertions"][0]["accession"] = "P00002"
+        with self.assertRaisesRegex(DataSourceError, "disagrees"):
+            render_report(data)
+
+    def test_conflicting_chebi_resolution_fails_closed(self):
+        data = fixture()
+        data["reactions"][0]["compound_membership"][0]["resolution_status"] = "unresolved"
+        with self.assertRaisesRegex(DataSourceError, "Conflicting ChEBI"):
+            render_report(data)
 
     def test_missing_reaction_fails_closed(self):
         data = fixture()
