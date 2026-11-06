@@ -31,11 +31,47 @@ def main() -> None:
         assert marker in page, "HTML body is missing"
         page = page.replace(
             marker,
-            "<script>"
-            "window.addEventListener('load',function(){"
-            "setTimeout(function(){document.getElementById('demo').click()},500)"
-            "})"
-            "</script>" + marker,
+            """<script>
+window.addEventListener('load',function(){
+  setTimeout(async function(){
+    let result = 'passed';
+    try {
+      document.getElementById('demo').click();
+      await new Promise(resolve => setTimeout(resolve,700));
+      document.getElementById('view-table').click();
+      const rows = document.querySelectorAll('#table-body tr').length;
+      if(rows !== 9) throw new Error('table rows ' + rows + ', expected 9');
+      if(document.getElementById('view-table').getAttribute('aria-pressed') !== 'true')
+        throw new Error('table aria-pressed missing');
+      const taxon = document.getElementById('taxon-id');
+      taxon.value = '10090';
+      taxon.dispatchEvent(new Event('input',{bubbles:true}));
+      if(document.getElementById('notices').hidden)
+        throw new Error('missing filter incompatibility notice');
+      if(document.getElementById('reset-filters').hidden)
+        throw new Error('missing filter recovery');
+      document.getElementById('reset-filters').click();
+      if(document.querySelectorAll('#table-body tr').length !== 9)
+        throw new Error('table was not restored on reset');
+      const dataset = document.getElementById('dataset-name').textContent;
+      const input = document.getElementById('file-input');
+      const transfer = new DataTransfer();
+      transfer.items.add(new File(['{invalid'], 'broken.json', {type:'application/json'}));
+      input.files = transfer.files;
+      input.dispatchEvent(new Event('change',{bubbles:true}));
+      await new Promise(resolve => setTimeout(resolve,500));
+      if(document.getElementById('dataset-name').textContent !== dataset)
+        throw new Error('invalid import replaced active dataset');
+      if(!document.getElementById('load-status').textContent.includes('прежний граф сохранён'))
+        throw new Error('invalid import does not explain preserved dataset');
+    } catch(error) { result = 'failed: ' + error.message; }
+    const output = document.createElement('output');
+    output.id = 'smoke-result';
+    output.textContent = result;
+    document.body.append(output);
+  },800);
+});
+</script>""" + marker,
         )
         index.write_text(page, encoding="utf-8")
 
@@ -80,6 +116,10 @@ def main() -> None:
                 f"Demo graph not rendered. count={shown!r}, source={source!r}, "
                 f"status={detail!r}, Chrome={result.stderr[-900:]}"
             )
+        check = re.search(r'id="smoke-result"[^>]*>([^<]*)</output>', output)
+        if not check or check.group(1) != "passed":
+            raise AssertionError("Evidence table/filter/import smoke failed: " +
+                                 (check.group(1) if check else "no smoke-result"))
         print("Headless Chrome smoke passed:", source, shown)
 
 
