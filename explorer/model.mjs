@@ -203,3 +203,51 @@ export function discoveryNotices(graph) {
       " (не отрицательный результат)");
   return notices;
 }
+
+
+/** Explain why the current Protein root is hidden; absence of evidence is not a reason. */
+function proteinFilterReason(data, options = {}) {
+  if (data.node_type !== "Protein") return null;
+  if (options.reviewedOnly === true && data.reviewed !== true)
+    return "Выбранный белок исключён фильтром reviewed.";
+  const taxon = String(options.taxonId ?? "").trim();
+  if (taxon && String(data.taxon_id ?? "") !== taxon)
+    return "Выбранный белок не относится к точному таксону " + taxon + ".";
+  const ec = String(options.ecNumber || "").trim().toLowerCase().replace(/^ec[ :]+/, "");
+  if (ec && !(Array.isArray(data.ec_numbers) &&
+              data.ec_numbers.some((n) => String(n).toLowerCase() === ec)))
+    return "Выбранный белок не имеет EC-классификации " + ec +
+      " в сохранённом графе.";
+  return null;
+}
+
+export function rootFilterReason(graph, rootId, options = {}) {
+  const node = graph.elements.nodes.find((row) => row.data.id === rootId);
+  return node ? proteinFilterReason(node.data, options) :
+    "Выбранный узел отсутствует в загруженном графе.";
+}
+
+/** Search all loaded node IDs, show capped eligible matches and honest counts. */
+export function searchNodesDetailed(graph, phrase, options = {}) {
+  const query = String(phrase || "").trim().toLowerCase();
+  const matchedDirections = new Set(graph.elements.edges.filter(({data}) =>
+    String(data.rhea_directional_id || "").toLowerCase().includes(query) && query
+  ).map(({data}) => data.target));
+  const matched = graph.elements.nodes.filter(({data}) => {
+    if (!query) return true;
+    const fields = [data.id, data.label, data.accession, data.rhea_master_id,
+      data.chebi_id, data.equation,
+      ...(Array.isArray(data.ec_numbers) ? data.ec_numbers : [])];
+    return matchedDirections.has(data.id) || fields.some((field) =>
+      typeof field === "string" && field.toLowerCase().includes(query));
+  });
+  const eligible = matched.filter(({data}) => !proteinFilterReason(data, options));
+  const maxResults = query ? 80 : 40;
+  return {
+    rows: eligible.slice(0, maxResults),
+    total: matched.length,
+    eligibleCount: eligible.length,
+    hiddenCount: matched.length - eligible.length,
+    limited: eligible.length > maxResults,
+  };
+}

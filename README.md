@@ -215,6 +215,30 @@ truncated=true; верхние 10 кандидатов не обязательн
 
 [Подробный контракт и ограничения](docs/architecture/evidence_discovery.md).
 
+## Человекочитаемый отчёт о доказательствах (v2, локально)
+
+После получения `2.0-reference-preview` JSON можно сформировать Markdown-отчёт
+**без сетевых запросов**, новых зависимостей и изменения исходного файла:
+
+~~~bash
+python -m enzymeinfocollector.reference_cli --accession P04040 -o integrated.json
+python -m enzymeinfocollector.report_cli integrated.json -o evidence.md
+
+# Или использовать результат по EC/названию с явным выбором кандидата:
+python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \\
+  --taxon-id 9606 --format reference-json -o verified.json
+python -m enzymeinfocollector.report_cli verified.json -o evidence.md
+~~~
+
+Отчёт отдельно показывает каждую прямую UniProt→Rhea аннотацию и её
+направленный Rhea ID, ECO, публикации, химических участников и стехиометрию.
+Он сохраняет информацию о provenance и усечении выборки. Отсутствие
+аннотации — **не отрицательный экспериментальный результат**; левая/правая
+стороны Rhea не обязательно означают физиологические субстраты и продукты.
+Markdown является представлением уже собранных данных, а не независимым
+научным подтверждением. При ошибке входного JSON существующий файл отчёта
+не перезаписывается.
+
 ## Графовый экспорт связей (v2, экспериментально)
 
 Проверенный JSON после сквозного запуска можно преобразовать в

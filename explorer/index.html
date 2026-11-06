@@ -34,6 +34,11 @@
       <span id="load-status">Загрузите Cytoscape JSON из <code>graph_cli</code> или откройте демо.</span>
     </div>
 
+    <div id="notices" class="notice-bar" role="status" aria-live="polite" hidden>
+      <div id="notice-text"></div>
+      <button id="reset-filters" class="small-button" type="button" hidden>Сбросить фильтры</button>
+    </div>
+
     <main class="workspace">
       <aside class="sidebar" aria-label="Поиск и фильтры">
         <section class="section">
@@ -80,12 +85,27 @@
             <h2 id="focus-title">Выберите узел</h2>
           </div>
           <div class="canvas-actions">
+            <div class="view-switch" role="group" aria-label="Режим просмотра">
+              <button id="view-graph" class="small-button" type="button" aria-pressed="true">Граф</button>
+              <button id="view-table" class="small-button" type="button" aria-pressed="false">Таблица</button>
+            </div>
             <button id="fit" class="small-button" type="button" disabled>Вписать</button>
             <button id="export" class="small-button strong-button" type="button" disabled>Экспорт подграфа</button>
           </div>
         </div>
         <div class="graph-holder">
           <div id="graph" aria-label="Интерактивная схема связей" role="application"></div>
+          <div id="table-view" class="table-view" role="region"
+               aria-label="Табличное представление аннотаций и участников" tabindex="0" hidden>
+            <p class="table-intro">Те же выбранные узлы и доказательства, что и в графе.
+              Используйте кнопки «Детали» для просмотра ECO, публикаций и происхождения.</p>
+            <table class="evidence-table">
+              <thead><tr><th scope="col">Тип</th><th scope="col">Источник / ID</th>
+                <th scope="col">Связь / цель</th><th scope="col">Аннотация или сторона Rhea</th>
+                <th scope="col">Действие</th></tr></thead>
+              <tbody id="table-body"></tbody>
+            </table>
+          </div>
           <div id="empty-state" class="empty">
             <div class="empty-graphic" aria-hidden="true"><span></span><span></span><span></span></div>
             <h3>Готов к исследованию</h3>

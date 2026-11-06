@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 import {
-  MAX_GRAPH_ELEMENTS, validateGraph, searchNodes, neighborhood, subgraph, discoveryNotices,
+  MAX_GRAPH_ELEMENTS, validateGraph, searchNodes, searchNodesDetailed, rootFilterReason, neighborhood, subgraph, discoveryNotices,
 } from "../model.mjs";
 
 const source = JSON.parse(readFileSync(new URL("../demo.json",import.meta.url),"utf8"));
@@ -159,4 +159,53 @@ test("discovery warnings show truncation and unknown direct Rhea status",() => {
   assert.match(notices[0],/усечены/);
   assert.match(notices[1],/не отрицательный результат/);
   assert.deepEqual(discoveryNotices(valid()),[]);
+});
+
+
+test("filter-aware search differentiates absent nodes from hidden proteins",() => {
+  const graph=valid();
+  assert.equal(rootFilterReason(graph,"protein:P00001",{reviewedOnly:true}),null);
+  assert.match(rootFilterReason(graph,"protein:P00001",{taxonId:"10090"}),/точному таксону/);
+  assert.match(rootFilterReason(graph,"protein:P00001",{ecNumber:"2.7.1.1"}),/EC-классификации/);
+  assert.equal(rootFilterReason(graph,"reaction:RHEA:10000",{taxonId:"10090"}),null);
+  const hidden=searchNodesDetailed(graph,"P00001",{taxonId:"10090"});
+  assert.equal(hidden.total,1);
+  assert.equal(hidden.hiddenCount,1);
+  assert.equal(hidden.eligibleCount,0);
+  assert.equal(hidden.rows.length,0);
+  const missing=searchNodesDetailed(graph,"NOT_IN_GRAPH",{});
+  assert.equal(missing.total,0);
+  assert.equal(missing.hiddenCount,0);
+  assert.equal(missing.rows.length,0);
+});
+
+test("filter-aware search counts more than eighty results without false completeness",() => {
+  const data=structuredClone(source);
+  data.elements.nodes=Array.from({length:95},(_,i)=>({
+    data:{id:"protein:P"+String(i+1).padStart(5,"0"),
+          label:"P"+String(i+1).padStart(5,"0"),node_type:"Protein",
+          reviewed:i%2===0}
+  }));
+  data.elements.edges=[];
+  const graph=validateGraph(data);
+  const limited=searchNodesDetailed(graph,"P",{});
+  assert.equal(limited.total,95);
+  assert.equal(limited.eligibleCount,95);
+  assert.equal(limited.rows.length,80);
+  assert.equal(limited.limited,true);
+  const reviewed=searchNodesDetailed(graph,"P",{reviewedOnly:true});
+  assert.equal(reviewed.total,95);
+  assert.equal(reviewed.hiddenCount,47);
+  assert.equal(reviewed.eligibleCount,48);
+  assert.equal(reviewed.limited,false);
+});
+
+test("accessible table and explicit recovery controls exist in HTML",() => {
+  const html=readFileSync(new URL("../index.html",import.meta.url),"utf8");
+  for (const id of ["view-graph","view-table","table-view","table-body",
+                    "notices","notice-text","reset-filters"]) {
+    assert.ok(html.includes('id="'+id+'"'),"Missing UI element: "+id);
+  }
+  assert.match(html,/aria-pressed="false"/);
+  assert.match(html,/<th scope="col">/);
 });
