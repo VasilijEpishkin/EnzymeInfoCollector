@@ -34,6 +34,15 @@
       <span id="load-status">Загрузите Cytoscape JSON из <code>graph_cli</code> или откройте демо.</span>
     </div>
 
+    <section id="dataset-notices" class="notice-strip" aria-label="Ограничения набора данных" hidden>
+      <strong>Ограничения и происхождение данных</strong>
+      <ul id="dataset-notice-list"></ul>
+    </section>
+    <section id="filter-notice" class="notice-strip filter-notice" role="alert" hidden>
+      <span id="filter-message"></span>
+      <button id="reset-filters" class="small-button" type="button">Сбросить фильтры</button>
+    </section>
+
     <main class="workspace">
       <aside class="sidebar" aria-label="Поиск и фильтры">
         <section class="section">
