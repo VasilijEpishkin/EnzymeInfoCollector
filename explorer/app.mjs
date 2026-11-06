@@ -1,9 +1,9 @@
-import { MAX_FILE_BYTES, validateGraph, searchNodes, neighborhood, subgraph, discoveryNotices } from "./model.mjs";
+import { MAX_FILE_BYTES, validateGraph, searchNodesDetailed, rootFilterReason, neighborhood, subgraph, discoveryNotices } from "./model.mjs";
 
 const $ = (id) => document.getElementById(id);
 const controls = ["search","depth","node-limit","filter-catalysis","filter-participants",
                   "filter-reviewed","taxon-id","ec-number","eco","fit","export"];
-let graph = null, cy = null, rootId = null, selectedId = null, visible = null, filename = "graph";
+let graph = null, cy = null, rootId = null, selectedId = null, visible = null, filename = "graph", viewMode = "graph";
 
 function el(tag, cls, value) {
   const node = document.createElement(tag);
@@ -121,6 +121,29 @@ function inspect(data, isEdge) {
     }
   }
 }
+function showNotices(messages, allowReset = false) {
+  const container = $("notice-text"); container.replaceChildren();
+  for (const message of messages) container.append(el("p","notice-line",message));
+  $("notices").hidden = messages.length === 0;
+  $("reset-filters").hidden = !allowReset;
+}
+
+function currentNotices() {
+  const messages = discoveryNotices(graph);
+  if (visible?.truncated) messages.push("Показан ограниченный подграф; это не полная выборка.");
+  if (graph?.provenance?.dataset_type === "synthetic-demo")
+    messages.unshift("Демо содержит синтетические связи, а не научные утверждения.");
+  else
+    messages.push("Метаданные запросов и SHA-256 не заменяют полный архив релизов баз данных.");
+  return messages;
+}
+
+function updateMode() {
+  $("view-graph").setAttribute("aria-pressed",String(viewMode === "graph"));
+  $("view-table").setAttribute("aria-pressed",String(viewMode === "table"));
+  $("fit").disabled = viewMode !== "graph" || !rootId;
+}
+
 function options() {
   return {
     depth: Number($("depth").value),
@@ -136,10 +159,12 @@ function options() {
 function searchResults() {
   const list = $("search-results"); list.replaceChildren();
   if (!graph) return;
-  const rows = searchNodes(graph,$("search").value);
-  $("results-count").textContent = "Найдено: " + rows.length + (rows.length === 80 ? "+" : "");
+  const result = searchNodesDetailed(graph,$("search").value,options());
+  $("results-count").textContent = "Доступно: " + result.eligibleCount +
+    (result.hiddenCount ? " · скрыто фильтрами: " + result.hiddenCount : "") +
+    (result.limited ? " · показаны первые " + result.rows.length : "");
   const labels = {Protein:"Белок",Reaction:"Реакция",Compound:"Соединение",UnresolvedCompound:"Не разрешено"};
-  for (const entry of rows) {
+  for (const entry of result.rows) {
     const d = entry.data;
     const button = el("button","result-entry" + (rootId === d.id ? " active" : ""));
     button.type = "button";
@@ -151,8 +176,13 @@ function searchResults() {
     button.addEventListener("click",() => {rootId = d.id; selectedId = d.id; render();});
     list.append(button);
   }
-  if (!rows.length) list.append(el("p","hint","Ничего не найдено в загруженном графе."));
+  if (!result.rows.length) {
+    list.append(el("p","hint",result.hiddenCount ?
+      "Совпадения найдены, но скрыты текущими фильтрами. Снимите фильтры." :
+      "Совпадений в загруженном файле нет; это не означает отсутствие активности."));
+  }
 }
+
 function styles() {
   return [
     {selector:"node",style:{"background-color":"#7695ac","label":"data(label)","font-size":11,
@@ -182,52 +212,135 @@ function ensureRenderer() {
     minZoom:0.12,maxZoom:3,wheelSensitivity:0.18,boxSelectionEnabled:false,
   });
   cy.on("tap","node, edge",(event) => {
-    selectedId = event.target.id();
-    inspect(event.target.data(),event.target.isEdge());
+    selectElement(event.target.id());
   });
   return cy;
 }
-function selectElement(id) {
-  if (!cy) return;
-  const element = cy.getElementById(id);
-  if (element.empty()) return;
-  cy.elements().unselect();
-  element.select();
-  selectedId = id;
-  inspect(element.data(),element.isEdge());
+function renderTable() {
+  const body = $("table-body"); body.replaceChildren();
+  if (!visible) return;
+  const records = [
+    ...visible.nodes.map((item) => ({data:item.data,isEdge:false})),
+    ...visible.edges.map((item) => ({data:item.data,isEdge:true})),
+  ];
+  for (const {data,isEdge} of records) {
+    const tr = el("tr","evidence-row");
+    const relation = isEdge ? data.relation : data.node_type;
+    const source = isEdge ? data.source : data.id;
+    const target = isEdge ? data.target : (data.label || data.id);
+    let summary;
+    if (!isEdge && data.node_type === "Protein")
+      summary = "reviewed=" + String(data.reviewed ?? "unknown") +
+        "; EC=" + (Array.isArray(data.ec_numbers) ? data.ec_numbers.join(", ") : "не указано");
+    else if (!isEdge && data.node_type === "Reaction") summary = data.equation || "Уравнение не указано";
+    else if (!isEdge) summary = data.formula || "Формула не указана";
+    else if (data.relation === "CATALYZES") {
+      const evidence = Array.isArray(data.evidence) ? data.evidence : [];
+      summary = (data.rhea_directional_id || "") + " (" + (data.direction || "неизвестное направление") +
+        "); ECO: " + (evidence.map((proof) => proof.eco_code).filter(Boolean).join(", ") || "не указан") +
+        "; публикации: " + (evidence.flatMap((proof) =>
+          Array.isArray(proof.citation_ids) ? proof.citation_ids : []).join(", ") || "не указаны");
+    } else
+      summary = "Rhea " + (data.side ?? "сторона неизвестна") +
+        "; коэффициент: " + (data.coefficient ?? "не указан") +
+        "; ChEBI: " + (data.reported_chebi_id ?? "не указан");
+    for (const value of [relation,source,target,summary]) {
+      const cell = el("td","",value);
+      tr.append(cell);
+    }
+    const button = el("button","small-button","Детали");
+    button.type = "button";
+    button.dataset.elementId = data.id;
+    button.setAttribute("aria-label","Показать доказательства и источник для " + data.id);
+    button.setAttribute("aria-pressed",String(data.id === selectedId));
+    button.addEventListener("click",() => selectElement(data.id));
+    const cell = el("td"); cell.append(button); tr.append(cell);
+    body.append(tr);
+  }
 }
+
+function selectElement(id) {
+  if (!visible) return;
+  const node = visible.nodes.find((item) => item.data.id === id);
+  const edge = visible.edges.find((item) => item.data.id === id);
+  const item = node || edge;
+  if (!item) return;
+  selectedId = id;
+  if (cy && viewMode === "graph") {
+    const element = cy.getElementById(id);
+    if (element.nonempty()) {
+      cy.elements().unselect();
+      element.select();
+    }
+  }
+  inspect(item.data,Boolean(edge));
+  for (const button of $("table-body").querySelectorAll("button[data-element-id]"))
+    button.setAttribute("aria-pressed",String(button.dataset.elementId === id));
+}
+
 function render() {
   if (!graph || !rootId) return;
   try {
+    const reason = rootFilterReason(graph,rootId,options());
+    if (reason) {
+      visible = null;
+      if (cy) cy.elements().remove();
+      $("graph").hidden = true; $("table-view").hidden = true;
+      $("empty-state").hidden = false;
+      $("empty-state").querySelector("h3").textContent = "Выбранный белок скрыт фильтрами";
+      $("empty-state").querySelector("p").textContent = "Сбросьте фильтры или выберите другой доступный узел.";
+      $("focus-title").textContent = "Фильтр исключил выбранный белок";
+      $("graph-count").textContent = "Показаны 0 узлов · фильтр исключил корневой узел";
+      inspect(null,false);
+      showNotices([reason,...discoveryNotices(graph)],true);
+      status(reason + " Сбросьте фильтры для восстановления графа.");
+      searchResults();
+      return;
+    }
     visible = neighborhood(graph,rootId,options());
-    const viewer = ensureRenderer();
-    viewer.elements().remove();
-    viewer.add([...visible.nodes,...visible.edges]);
-    viewer.layout({name:"cose",animate:false,fit:true,padding:40,randomize:false,numIter:300,
-      nodeRepulsion:() => 450000,idealEdgeLength:() => 95}).run();
+    $("graph").hidden = viewMode !== "graph";
+    $("table-view").hidden = viewMode !== "table";
+    if (viewMode === "graph") {
+      const viewer = ensureRenderer();
+      viewer.resize();
+      viewer.elements().remove();
+      viewer.add([...visible.nodes,...visible.edges]);
+      viewer.layout({name:"cose",animate:false,fit:true,padding:40,randomize:false,numIter:300,
+        nodeRepulsion:() => 450000,idealEdgeLength:() => 95}).run();
+    } else {
+      renderTable();
+    }
     $("empty-state").hidden = true;
     $("focus-title").textContent = rootId;
     $("graph-count").textContent = "Узлов: " + visible.nodes.length + " · связей: " + visible.edges.length;
     status(graph.elements.nodes.length + " узлов в файле · показано " + visible.nodes.length +
-      (visible.truncated ? " · область ограничена" : "") +
-      (discoveryNotices(graph).length ? " · " + discoveryNotices(graph).join(" · ") : ""));
-    if (selectedId && viewer.getElementById(selectedId).nonempty()) selectElement(selectedId);
-    else selectElement(rootId);
+      (visible.truncated ? " · ограниченный просмотр" : ""));
+    showNotices(currentNotices());
+    updateMode();
+    const inView = [...visible.nodes,...visible.edges].some((item) => item.data.id === selectedId);
+    selectElement(inView ? selectedId : rootId);
     searchResults();
   } catch (error) {
-    if (cy) cy.elements().remove(); // Never retain an old, misleading view.
+    if (cy) cy.elements().remove();
     visible = null;
+    $("graph").hidden = true; $("table-view").hidden = true;
     $("empty-state").hidden = false;
-    $("focus-title").textContent = "Нет связей по выбранным фильтрам";
-    $("graph-count").textContent = "0 узлов · 0 связей";
+    $("empty-state").querySelector("h3").textContent = "Не удалось применить фильтр";
+    $("empty-state").querySelector("p").textContent = "Проверьте параметры слева и исправьте неверное значение.";
+    $("focus-title").textContent = "Ошибка параметров просмотра";
+    $("graph-count").textContent = "Данные не отображаются";
     inspect(null,false);
+    showNotices(["Ошибка параметров: " + error.message],true);
     status("Ошибка фильтра: " + error.message);
+    searchResults();
   }
 }
+
 async function load(data,name,isDemo) {
   const validated = validateGraph(data);
-  ensureRenderer();
   graph = validated;
+  if (typeof window.cytoscape !== "function") viewMode = "table";
+  updateMode();
   filename = name;
   $("dataset-name").textContent = isDemo ? "ДЕМО — синтетические данные" : name;
   $("search").value = ""; $("eco").value = ""; $("taxon-id").value = ""; $("ec-number").value = "";
@@ -242,6 +355,7 @@ async function load(data,name,isDemo) {
     graph.elements.nodes[0]?.data.id || null;
   selectedId = rootId;
   for (const id of controls) $(id).disabled = !rootId;
+  updateMode();
   if (rootId) render();
   else {
     $("empty-state").hidden = false;
@@ -263,7 +377,7 @@ $("file-input").addEventListener("change",async (event) => {
     if (file.size > MAX_FILE_BYTES)
       throw new Error("Файл больше 8 МБ; экспортируйте небольшой граф.");
     await load(JSON.parse(await file.text()),file.name,false);
-  } catch (error) { status("Не удалось открыть файл: " + error.message); }
+  } catch (error) { status("Не удалось открыть файл: " + error.message + (graph ? "; прежний граф сохранён: " + filename : "; граф не загружен")); }
   event.target.value = "";
 });
 $("demo").addEventListener("click",async () => {
@@ -271,9 +385,17 @@ $("demo").addEventListener("click",async () => {
     const response = await fetch("./demo.json",{cache:"no-store"});
     if (!response.ok) throw new Error("Демо-файл не найден.");
     await load(await response.json(),"demo.json",true);
-  } catch (error) { status("Ошибка демо: " + error.message); }
+  } catch (error) { status("Ошибка демо: " + error.message + (graph ? "; прежний граф сохранён: " + filename : "")); }
 });
 $("search").addEventListener("input",searchResults);
+$("view-graph").addEventListener("click",() => {viewMode = "graph"; updateMode(); render();});
+$("view-table").addEventListener("click",() => {viewMode = "table"; updateMode(); render();});
+$("reset-filters").addEventListener("click",() => {
+  $("filter-reviewed").checked = false;
+  $("taxon-id").value = ""; $("ec-number").value = ""; $("eco").value = "";
+  $("filter-catalysis").checked = true; $("filter-participants").checked = true;
+  render();
+});
 for (const id of ["depth","node-limit","filter-catalysis","filter-participants",
                    "filter-reviewed","taxon-id","ec-number","eco"]) {
   $(id).addEventListener(["eco","taxon-id","ec-number"].includes(id) ? "input" : "change",render);
