@@ -17,6 +17,7 @@ from typing import Any, Mapping
 from .sources import DataSourceError, _atomic_write
 
 _SCHEMA = "2.0-reference-preview"
+_MAX_INPUT_BYTES = 32 * 1024 * 1024
 _UNIPROT = re.compile(r"[A-Z0-9]+(?:-[0-9]+)?\Z")
 _RHEA = re.compile(r"RHEA:[1-9][0-9]*\Z")
 _CHEBI = re.compile(r"CHEBI:[1-9][0-9]*\Z")
@@ -136,27 +137,58 @@ def render_report(reference: Mapping[str, Any], *, accession: str | None = None)
 
     provenance = _object(reference["provenance"], "provenance")
     discovery = provenance.get("discovery")
+    candidates_by_accession: dict[str, Mapping[str, Any]] = {}
     if discovery is not None:
         discovery = _object(discovery, "discovery")
         selection = discovery.get("selection") or {}
         if not isinstance(selection, dict):
             raise DataSourceError("discovery.selection must be an object")
         lines += ["## Условия выбора и полнота", ""]
+        raw_candidates = selection.get("candidate_pool") or selection.get("selected", [])
+        if isinstance(raw_candidates, list):
+            for candidate in raw_candidates:
+                if isinstance(candidate, dict):
+                    candidate_acc = candidate.get("accession")
+                    if isinstance(candidate_acc, str) and _UNIPROT.fullmatch(candidate_acc):
+                        candidates_by_accession[candidate_acc] = candidate
         if selection.get("truncated") is True or discovery.get("truncated") is True:
             lines.append("- **Выборка UniProt-кандидатов ограничена лимитом.** Это не полный список ферментов данного EC.")
-        if selection.get("selected"):
-            lines.append("- Выбранный accession: " + _cell(selection["selected"]))
+        selected_candidates = selection.get("selected")
+        if isinstance(selected_candidates, list):
+            selected_ids = [
+                row.get("accession") if isinstance(row, dict) else row
+                for row in selected_candidates
+            ]
+            if selected_ids:
+                lines.append("- Выбранные кандидаты UniProt: " +
+                             _cell(", ".join(str(item) for item in selected_ids)))
+        elif isinstance(selected_candidates, str):
+            lines.append("- Выбранный accession: " + _cell(selected_candidates))
+        search_source = selection.get("source")
+        if isinstance(search_source, dict):
+            lines.append("- Снимок поиска UniProt (не архивный релиз): " +
+                         "; ".join(label + ": " + _cell(search_source.get(key))
+                                   for label, key in (
+                                       ("дата", "fetched_at"),
+                                       ("SHA-256", "sha256"),
+                                       ("URL", "url"),
+                                   )))
         missing_links = discovery.get("without_direct_rhea_annotation", [])
         for identifier in sorted(_list(missing_links, "without_direct_rhea_annotation")):
             lines.append("- " + _cell(identifier) + ": прямая Rhea-аннотация не найдена в выборке; активность неизвестна.")
-        if len(lines) >= 2 and lines[-1] == "## Условия выбора и полнота":
-            lines.append("- Дополнительных ограничений поиска не заявлено в provenance.")
         lines.append("")
 
     lines += ["## Белки и прямые аннотации", ""]
     for acc in selected:
         protein = indexed[acc]
         lines += ["### UniProt " + _cell(acc), ""]
+        candidate = candidates_by_accession.get(acc)
+        if candidate is not None:
+            if candidate.get("protein_name"):
+                lines.append("- Название (предпросмотр UniProt, не доказательство активности): " +
+                             _cell(candidate["protein_name"]))
+            if candidate.get("gene_names"):
+                lines.append("- Гены (предпросмотр UniProt): " + _cell(candidate["gene_names"]))
         for label, key in (
             ("Название", "protein_name"), ("Ген", "gene_name"),
             ("Организм", "organism_name"), ("Таксон NCBI", "taxon_id"),
@@ -280,6 +312,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("-o", "--output", type=Path, help="Write Markdown atomically (default: stdout)")
     args = parser.parse_args(argv)
     try:
+        if args.input.stat().st_size > _MAX_INPUT_BYTES:
+            raise DataSourceError("Reference JSON exceeds the 32 MB input limit")
         reference = json.loads(args.input.read_text(encoding="utf-8"))
         result = render_report(reference, accession=args.accession)
         if args.output is not None:
