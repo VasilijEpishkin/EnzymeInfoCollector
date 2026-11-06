@@ -206,10 +206,7 @@ export function discoveryNotices(graph) {
 
 
 /** Explain why the current Protein root is hidden; absence of evidence is not a reason. */
-export function rootFilterReason(graph, rootId, options = {}) {
-  const node = graph.elements.nodes.find((row) => row.data.id === rootId);
-  if (!node) return "Выбранный узел отсутствует в загруженном графе.";
-  const data = node.data;
+function proteinFilterReason(data, options = {}) {
   if (data.node_type !== "Protein") return null;
   if (options.reviewedOnly === true && data.reviewed !== true)
     return "Выбранный белок исключён фильтром reviewed.";
@@ -222,6 +219,12 @@ export function rootFilterReason(graph, rootId, options = {}) {
     return "Выбранный белок не имеет EC-классификации " + ec +
       " в сохранённом графе.";
   return null;
+}
+
+export function rootFilterReason(graph, rootId, options = {}) {
+  const node = graph.elements.nodes.find((row) => row.data.id === rootId);
+  return node ? proteinFilterReason(node.data, options) :
+    "Выбранный узел отсутствует в загруженном графе.";
 }
 
 /** Search all loaded node IDs, show capped eligible matches and honest counts. */
@@ -238,8 +241,7 @@ export function searchNodesDetailed(graph, phrase, options = {}) {
     return matchedDirections.has(data.id) || fields.some((field) =>
       typeof field === "string" && field.toLowerCase().includes(query));
   });
-  const eligible = matched.filter(({data}) =>
-    !rootFilterReason(graph, data.id, options));
+  const eligible = matched.filter(({data}) => !proteinFilterReason(data, options));
   const maxResults = query ? 80 : 40;
   return {
     rows: eligible.slice(0, maxResults),
