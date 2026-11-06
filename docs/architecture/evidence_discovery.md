@@ -12,6 +12,9 @@ python -m enzymeinfocollector.discover_cli \
     --enzyme Catalase --taxon-id 9606 --format graphml -o network.graphml
 python -m enzymeinfocollector.discover_cli \
     --ec 1.11.1.6 --taxon-id 9606 --format reference-json -o verified.json
+python -m enzymeinfocollector.discover_cli \
+    --ec 1.11.1.6 --taxon-id 9606 --select-accession P04040 \
+    --format report-md -o evidence.md
 ~~~
 
 `--ec` and `--enzyme` are exclusive. Names are resolved with the existing
@@ -68,6 +71,16 @@ Truncation counts are detected with an extra returned candidate; this does
 not give the total number of matches or guarantee that the top N are
 representative. The current online UniProt ordering determines the
 selection, and this order may change.
+
+The optional `--format report-md` renders the **same verified reference**
+in human-readable Markdown, using the offline renderer introduced in PR #31.
+It is a presentation of direct source assertions, not a new evidence source.
+The current discovery run still queries live sources, validates selected
+accessions against the bounded UniProt candidate pool, checks optional
+`--expected-search-sha`, and enforces the existing Rhea/ChEBI limits.
+For an accession known independently of an EC search,
+`reference_cli --accession ID --format report-md` provides the corresponding
+one-command path. For a saved verified JSON, `report_cli` remains network-free.
 
 Each invocation writes **one** output file atomically (or prints stdout).
 To export another format, re-run with the same parameters and the cache;

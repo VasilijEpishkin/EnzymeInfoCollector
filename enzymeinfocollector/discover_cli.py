@@ -16,6 +16,7 @@ import sys
 from .evidence_discovery import MAX_DISCOVERY, collect_discovered_graph, preview_candidates
 from .graph_export import graph_json, to_graphml
 from .reference_dataset import reference_json
+from .report_cli import render_report
 from .sources import DataSourceError, HttpCache, _atomic_write, default_cache_dir
 
 
@@ -45,9 +46,9 @@ def main(argv: list[str] | None = None) -> int:
                         help="UniProt NCBI taxonomy ID for candidate discovery")
     parser.add_argument("--taxon-scope", choices=("exact", "descendants"), default="exact",
                         help="Exact organism ID (default) or UniProt taxonomy lineage search")
-    parser.add_argument("--format", choices=("cytoscape-json", "graphml", "reference-json", "candidates-json"),
+    parser.add_argument("--format", choices=("cytoscape-json", "graphml", "reference-json", "candidates-json", "report-md"),
                         default="cytoscape-json",
-                        help="Graph (default), GraphML, verified reference, or candidate preview without chemistry")
+                        help="Graph (default), GraphML, verified JSON, candidates preview, or evidence Markdown")
     parser.add_argument("--select-accession",
                         help="Use only this accession from the current bounded UniProt candidate list")
     parser.add_argument("--expected-search-sha",
@@ -91,6 +92,8 @@ def main(argv: list[str] | None = None) -> int:
             content = to_graphml(graph)
         elif args.format == "reference-json":
             content = reference_json(reference)
+        elif args.format == "report-md":
+            content = render_report(reference)
         else:
             content = graph_json(graph)
         if args.output:
