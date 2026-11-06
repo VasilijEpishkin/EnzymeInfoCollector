@@ -223,7 +223,7 @@ truncated=true; верхние 10 кандидатов не обязательн
 источникам и сразу сохраняет Markdown:
 
 ~~~bash
-python -m enzymeinfocollector.reference_cli --accession P04040 \\
+python -m enzymeinfocollector.reference_cli --accession P04040 \
   --format report-md -o evidence.md
 ~~~
 
@@ -232,12 +232,12 @@ python -m enzymeinfocollector.reference_cli --accession P04040 \\
 предпочтительную каталитическую активность:
 
 ~~~bash
-python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \\
+python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \
   --taxon-id 9606 --max-proteins 3 --format candidates-json -o candidates.json
 
 # Подставьте accession из selection.selected (здесь P04040 — пример).
-python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \\
-  --taxon-id 9606 --max-proteins 3 --select-accession P04040 \\
+python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \
+  --taxon-id 9606 --max-proteins 3 --select-accession P04040 \
   --format report-md -o evidence.md
 ~~~
 
