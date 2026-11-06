@@ -182,6 +182,32 @@ python -m enzymeinfocollector.discover_cli --ec 1.11.1.6 \
 отсутствия активности. Когда кандидатов больше ограничения, команда
 сообщает об усечении выборки и сохраняет этот факт вместе с provenance.
 
+### Предварительный просмотр и осознанный выбор белка
+
+Порядок UniProt-кандидатов может меняться. Рекомендуется сначала посмотреть
+ограниченную выдачу **без загрузки Rhea/ChEBI**, затем выбрать accession.
+Выдача включает UniProt accession, полное название белка, исходные названия генов, reviewed-статус, таксон и EC-классификацию. Она не доказывает каталитическую активность и не ранжирует белки по ней.
+
+~~~bash
+python -m enzymeinfocollector.discover_cli --ec 7.2.2.13 \
+  --taxon-id 9606 --max-proteins 10 --format candidates-json -o candidates.json
+
+# Подставьте accession из selection.selected в candidates.json.
+python -m enzymeinfocollector.discover_cli --ec 7.2.2.13 \
+  --taxon-id 9606 --max-proteins 10 --select-accession Q13733 \
+  --format reference-json -o chosen.json
+~~~
+
+Поле selection.source.sha256 в candidates.json можно указать через
+--expected-search-sha при повторном запросе, чтобы отменить построение
+графа, если поисковый ответ изменился. Без этого параметра accession всё равно
+проверяется по *текущей* выдаче. Одновременно использовать --select-accession
+и --format candidates-json нельзя. При усечении источника отображается
+truncated=true; верхние 10 кандидатов не обязательно охватывают EC-класс.
+
+Если нужный ID не попал в ограниченный список, используйте существующую
+команду reference_cli --accession ID. Она проверяет прямые UniProt/Rhea
+аннотации, но не подтверждает соответствие исходному поисковому EC-запросу.
 **Важно:** поиск по названию с несколькими EC-классами завершится
 сообщением о неоднозначности: необходимо указать `--ec`. При отсутствии
 у выбранных белков прямых Rhea-аннотаций команда откажется создавать
@@ -219,8 +245,8 @@ python -m enzymeinfocollector.graph_cli integrated.json --format cytoscape-json 
 видимую область. Граф не создаёт новых биологических утверждений.
 
 ~~~bash
-python -m http.server 8000 --bind 127.0.0.1
-# Открыть http://127.0.0.1:8000/explorer/
+python -m http.server 8000 --bind 127.0.0.1 --directory explorer
+# Открыть http://127.0.0.1:8000/
 ~~~
 
 В браузере выберите файл \`network.json\` после экспорта

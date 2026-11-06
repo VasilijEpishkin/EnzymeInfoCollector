@@ -29,7 +29,7 @@ SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
 ONE_DAY = 24 * 60 * 60
 ONE_WEEK = 7 * ONE_DAY
 MAX_DISCOVERY = 10
-SEARCH_HEADER = ["Entry", "Reviewed", "Organism (ID)", "EC number"]
+SEARCH_HEADER = ["Entry", "Reviewed", "Organism (ID)", "EC number", "Protein names", "Gene Names"]
 
 
 def _checked_response(cache: HttpCache, url: str, *, refresh: bool, ttl: int):
@@ -115,7 +115,7 @@ def discover_accessions(
         query += f" AND {field}:{taxon_id}"
     params = urlencode({
         "query": query, "format": "tsv",
-        "fields": "accession,reviewed,organism_id,ec",
+        "fields": "accession,reviewed,organism_id,ec,protein_name,gene_names",
         "size": max_proteins + 1,
     })
     url = f"{SEARCH_URL}?{params}"
@@ -149,6 +149,8 @@ def discover_accessions(
             "reviewed": raw_review == "reviewed",
             "taxon_id": int(tax_raw),
             "ec_numbers": [x.strip() for x in row["EC number"].split(";") if x.strip()],
+            "protein_name": row["Protein names"] or None,
+            "gene_names": row["Gene Names"] or None,
         })
         if len(records) > max_proteins:
             # The HTTP response is already bounded to limit+1 records.
@@ -171,11 +173,41 @@ def discover_accessions(
     }
 
 
-def collect_discovered_graph(
+def preview_candidates(
     cache: HttpCache, *, ec: str | None = None, enzyme: str | None = None,
     max_proteins: int = 3, reviewed_only: bool = True,
     taxon_id: int | None = None, taxon_scope: str = "exact",
     refresh: bool = False,
+) -> dict[str, Any]:
+    """Return a bounded UniProt candidate preview WITHOUT catalytic assertions.
+
+    This is intentionally cheap: ExPASy for names and one bounded UniProt
+    search; no UniProt entry, Rhea, ChEBI or reaction graph is fetched.
+    """
+    resolved_ec, resolved = resolve_ec(cache, ec=ec, enzyme=enzyme, refresh=refresh)
+    discovery = discover_accessions(
+        cache, resolved_ec, max_proteins=max_proteins,
+        reviewed_only=reviewed_only, taxon_id=taxon_id,
+        taxon_scope=taxon_scope, refresh=refresh,
+    )
+    return {
+        "schema_version": "2.0-candidates-preview",
+        "semantics": {
+            "candidate_not_catalytic_evidence": True,
+            "search_order_not_biological_rank": True,
+            "unknown_is_not_negative": True,
+        },
+        "request": resolved,
+        "selection": discovery,
+    }
+
+
+def collect_discovered_graph(
+    cache: HttpCache, *, ec: str | None = None, enzyme: str | None = None,
+    max_proteins: int = 3, reviewed_only: bool = True,
+    taxon_id: int | None = None, taxon_scope: str = "exact",
+    refresh: bool = False, select_accession: str | None = None,
+    expected_search_sha: str | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Return verified reference and Cytoscape graph for selected candidates.
 
@@ -188,6 +220,34 @@ def collect_discovered_graph(
         reviewed_only=reviewed_only, taxon_id=taxon_id,
         taxon_scope=taxon_scope, refresh=refresh,
     )
+    if expected_search_sha is not None:
+        if not isinstance(expected_search_sha, str) or not re.fullmatch(
+            r"[a-f0-9]{64}", expected_search_sha
+        ):
+            raise ValueError("Expected candidate-search SHA must be 64 lowercase hex characters")
+        if select_accession is None:
+            raise ValueError("Expected candidate-search SHA requires an explicit accession")
+        if discovery["source"]["sha256"] != expected_search_sha:
+            raise DataSourceError(
+                "UniProt candidate-search snapshot changed since preview; "
+                "repeat candidate preview before selecting"
+            )
+    if select_accession is not None:
+        if not isinstance(select_accession, str) or not UNIPROT_ACCESSION.fullmatch(select_accession):
+            raise ValueError(f"Invalid canonical UniProt accession {select_accession!r}")
+        candidates = discovery["selected"]
+        matched = next((item for item in candidates if item["accession"] == select_accession), None)
+        if matched is None:
+            raise DataSourceError(
+                f"Requested accession {select_accession!r} is not in the current "
+                f"bounded candidate list (max {max_proteins}); use candidate preview "
+                "or increase --max-proteins, or use reference_cli for accession-only input"
+            )
+        discovery["candidate_pool"] = candidates
+        discovery["selected"] = [matched]
+        discovery["selection_mode"] = "explicit_accession"
+    else:
+        discovery["selection_mode"] = "first_n_search_order"
     accessions = [item["accession"] for item in discovery["selected"]]
     evidence = DirectEvidenceCollector(cache).collect(accessions, refresh=refresh)
     observed_accessions = [protein.accession for protein in evidence.proteins]

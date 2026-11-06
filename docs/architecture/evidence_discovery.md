@@ -86,3 +86,25 @@ atomic CLI output and no EC-based Cartesian join between proteins/reactions.
 A bounded live check uses P04040 with EC 1.11.1.6, taxon 9606, reviewed
 only and one selected accession. Public GitHub Actions run the offline
 Python suite on 3.11/3.13; optional live checks are separate.
+
+## Candidate preview and explicit accession choice
+
+The opt-in --format candidates-json path resolves the requested name or EC
+and performs only a bounded UniProt search; it does not fetch catalytic
+annotations, Rhea RDF or ChEBI. Output schema: 2.0-candidates-preview.
+Search ordering is not a measure of biochemical relevance.
+
+With --select-accession, only an ID present among the current first N
+candidates may be used to collect direct evidence and construct a graph.
+The discovery provenance stores the full candidate_pool, the chosen
+selection.selected and selection_mode=explicit_accession, the original
+search query, truncation, timestamp and SHA-256. EC alone never creates
+protein-reaction edges.
+
+Optional --expected-search-sha must match the SHA-256 of the candidate
+preview response. If the search source changes, the request fails before
+protein evidence is fetched. SHA-256 is a source observation, not an
+immutable UniProt release ID. Change in query filters or max-proteins
+may change its value. Without the hash option, current membership is
+still enforced. The accession-first reference_cli is an alternative
+when an entry is outside the bounded candidate pool.
