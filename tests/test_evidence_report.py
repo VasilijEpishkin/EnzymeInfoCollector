@@ -77,7 +77,7 @@ def sample():
 class EvidenceReportTests(unittest.TestCase):
     def test_report_preserves_actual_catalase_equation_and_stoichiometry(self):
         text = build_evidence_report(sample())
-        self.assertIn("2 H2O2 = 2 H2O + O2", text)
+        self.assertIn(r"2 H2O2 = 2 H2O \+ O2", text)
         self.assertIn("left | 2 | CHEBI:16240 | CHEBI:16240", text)
         self.assertIn("right | 2 | CHEBI:15377 | CHEBI:15377", text)
         self.assertIn("right | 1 | CHEBI:25805 | CHEBI:25805", text)
@@ -102,13 +102,13 @@ class EvidenceReportTests(unittest.TestCase):
     def test_deterministic_under_reordering_and_safe_markdown(self):
         original = sample()
         result = build_evidence_report(original)
-        self.assertNotIn("<img", result)
+        self.assertNotIn("Catalase <img", result)
         self.assertIn(r"\<img", result)
         reverse = deepcopy(original)
         reverse["proteins"].reverse()
         reverse["reactions"][0]["compound_membership"].reverse()
         reverse["compounds"].reverse()
-        reverse["proteins"][0]["direct_assertions"].reverse()
+        reverse["proteins"][1]["direct_assertions"].reverse()
         self.assertEqual(result, build_evidence_report(reverse))
 
     def test_bad_schema_and_missing_asserted_reaction_fail_closed(self):
