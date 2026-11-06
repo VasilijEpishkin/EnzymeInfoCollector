@@ -202,3 +202,16 @@ test("filter warnings and explicit reset are present in the static interface",()
   assert.match(app,/searchWithFilters/);
   assert.match(app,/Ранее загруженный набор/);
 });
+
+test("keyboard-friendly tables reuse scoped graph and link to inspector",() => {
+  const html=readFileSync(new URL("../index.html",import.meta.url),"utf8");
+  const app=readFileSync(new URL("../app.mjs",import.meta.url),"utf8");
+  for (const id of ["toggle-table","table-view","nodes-body","relations-body"]) {
+    assert.ok(html.includes('id="'+id+'"'));
+  }
+  assert.match(html,/<th scope="col">/);
+  assert.match(html,/id="inspector-content"[^>]+tabindex="-1"/);
+  assert.match(app,/function renderTable\(/);
+  assert.match(app,/selectElement\(elementId\)/);
+  assert.match(app,/renderTable\(\)/);
+});
