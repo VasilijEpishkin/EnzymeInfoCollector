@@ -29,7 +29,7 @@ SEARCH_URL = "https://rest.uniprot.org/uniprotkb/search"
 ONE_DAY = 24 * 60 * 60
 ONE_WEEK = 7 * ONE_DAY
 MAX_DISCOVERY = 10
-SEARCH_HEADER = ["Entry", "Reviewed", "Organism (ID)", "EC number"]
+SEARCH_HEADER = ["Entry", "Reviewed", "Organism (ID)", "EC number", "Protein names", "Gene Names"]
 
 
 def _checked_response(cache: HttpCache, url: str, *, refresh: bool, ttl: int):
@@ -115,7 +115,7 @@ def discover_accessions(
         query += f" AND {field}:{taxon_id}"
     params = urlencode({
         "query": query, "format": "tsv",
-        "fields": "accession,reviewed,organism_id,ec",
+        "fields": "accession,reviewed,organism_id,ec,protein_name,gene_names",
         "size": max_proteins + 1,
     })
     url = f"{SEARCH_URL}?{params}"
@@ -149,6 +149,8 @@ def discover_accessions(
             "reviewed": raw_review == "reviewed",
             "taxon_id": int(tax_raw),
             "ec_numbers": [x.strip() for x in row["EC number"].split(";") if x.strip()],
+            "protein_name": row["Protein names"] or None,
+            "gene_names": row["Gene Names"] or None,
         })
         if len(records) > max_proteins:
             # The HTTP response is already bounded to limit+1 records.

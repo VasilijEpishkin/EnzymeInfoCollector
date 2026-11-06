@@ -30,7 +30,7 @@ from enzymeinfocollector.sources import CachedResponse, DataSourceError
 RELEASE = SourceRelease("UniProtKB", "synthetic", "2026-10-30T08:00:00Z")
 RHEA = SourceRelease("Rhea", "synthetic", "2026-10-30T08:00:00Z")
 CHEBI = SourceRelease("ChEBI", "synthetic", "2026-10-30T08:00:00Z")
-HEADER = "Entry\tReviewed\tOrganism (ID)\tEC number\n"
+HEADER = "Entry\tReviewed\tOrganism (ID)\tEC number\tProtein names\tGene Names\n"
 
 
 class SearchCache:
@@ -49,7 +49,7 @@ class SearchCache:
         if "/uniprotkb/search?" in url:
             count = int(parse_qs(urlsplit(url).query)["size"][0])
             rows = self.rows[:count]
-            body = HEADER + "".join("\t".join(x) + "\n" for x in rows)
+            body = HEADER + "".join("\t".join((*x, "Synthetic protein", "GENE")) + "\n" for x in rows)
         elif url.endswith("/enzyme/enzyme.dat"):
             body = "synthetic ExPASy file"
         else:
@@ -136,6 +136,8 @@ class DiscoveryTests(unittest.TestCase):
         self.assertTrue(result["semantics"]["search_order_not_biological_rank"])
         self.assertEqual([row["accession"] for row in result["selection"]["selected"]],
                          ["P04040", "Q42547"])
+        self.assertEqual(result["selection"]["selected"][0]["protein_name"], "Synthetic protein")
+        self.assertEqual(result["selection"]["selected"][0]["gene_names"], "GENE")
         self.assertTrue(result["selection"]["truncated"])
         self.assertEqual(len(cache.urls), 1)  # UniProt search; no Rhea/ChEBI
 
