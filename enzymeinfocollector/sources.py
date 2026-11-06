@@ -12,7 +12,6 @@ import io
 import json
 import math
 import os
-import pickle
 import re
 import shutil
 import tempfile
@@ -640,7 +639,7 @@ def iter_uniprot(
         run_paths, metadata = cached
         try:
             with ExitStack() as stack:
-                streams = [stack.enter_context(path.open("rb")) for path in run_paths]
+                streams = [stack.enter_context(path.open("r", encoding="utf-8")) for path in run_paths]
                 yield heapq.merge(
                     *(_read_uniprot_run(stream) for stream in streams),
                     key=lambda record: record["accession"],
@@ -656,7 +655,7 @@ def iter_uniprot(
         while len(run_paths) > UNIPROT_MERGE_FAN_IN:
             run_paths = _merge_uniprot_runs(run_paths, Path(directory))
         with ExitStack() as stack:
-            streams = [stack.enter_context(path.open("rb")) for path in run_paths]
+            streams = [stack.enter_context(path.open("r", encoding="utf-8")) for path in run_paths]
             sorted_records = heapq.merge(
                 *(_read_uniprot_run(stream) for stream in streams),
                 key=lambda record: record["accession"],
@@ -707,36 +706,40 @@ def _build_uniprot_runs(stream: TextIO, directory: Path, *, require_sequence: bo
 
 
 def _write_uniprot_run(directory: Path, index: int, records: list[dict[str, Any]]) -> Path:
-    path = directory / f"{index}.pickle"
+    path = directory / f"{index}.jsonl"
     records.sort(key=lambda item: item["accession"])
-    with path.open("wb") as stream:
+    with path.open("w", encoding="utf-8", newline="\n") as stream:
         for record in records:
-            pickle.dump(record, stream, protocol=pickle.HIGHEST_PROTOCOL)
+            stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
     return path
 
 
-def _read_uniprot_run(stream: Any) -> Iterator[dict[str, Any]]:
-    while True:
+def _read_uniprot_run(stream: TextIO) -> Iterator[dict[str, Any]]:
+    """Decode JSONL records without executable deserialization."""
+    for line in stream:
         try:
-            yield pickle.load(stream)
-        except EOFError:
-            return
+            record = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise DataSourceError("Corrupt UniProt external-sort JSONL record") from error
+        if not isinstance(record, dict) or not isinstance(record.get("accession"), str):
+            raise DataSourceError("Invalid UniProt external-sort JSONL record")
+        yield record
 
 
 def _merge_uniprot_runs(paths: list[Path], directory: Path) -> list[Path]:
     merged_paths = []
     for group_index in range(0, len(paths), UNIPROT_MERGE_FAN_IN):
         group = paths[group_index:group_index + UNIPROT_MERGE_FAN_IN]
-        target = directory / f"merge-{len(merged_paths)}-{group[0].stem}.pickle"
+        target = directory / f"merge-{len(merged_paths)}-{group[0].stem}.jsonl"
         with ExitStack() as stack:
-            streams = [stack.enter_context(path.open("rb")) for path in group]
+            streams = [stack.enter_context(path.open("r", encoding="utf-8")) for path in group]
             merged = heapq.merge(
                 *(_read_uniprot_run(stream) for stream in streams),
                 key=lambda record: record["accession"],
             )
-            with target.open("wb") as output:
+            with target.open("w", encoding="utf-8", newline="\n") as output:
                 for record in merged:
-                    pickle.dump(record, output, protocol=pickle.HIGHEST_PROTOCOL)
+                    output.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n")
         merged_paths.append(target)
         for path in group:
             path.unlink()
