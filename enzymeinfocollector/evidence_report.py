@@ -217,7 +217,20 @@ def build_evidence_report(value: dict) -> str:
             out.append("| не указано | не указано | не указано | не указано | не указано | участников нет в снимке |")
         out.append("")
 
-    out.extend(["## Неполные данные и происхождение", ""])
+    used_compounds = {
+        member.get("primary_chebi_id")
+        for master in master_ids
+        for member in reactions[master]["compound_membership"]
+        if member.get("primary_chebi_id") is not None
+    }
+    out.extend(["## Происхождение химических записей ChEBI", ""])
+    for compound_id in sorted(used_compounds):
+        out.append(f"- {safe(compound_id)}: " +
+                   source_info(compounds[compound_id].get("source_release")) + ".")
+    if not used_compounds:
+        out.append("- Разрешённых записей ChEBI в сохранённом наборе нет.")
+    out.extend(["", "## Неполные данные и происхождение", ""])
+
     for key, label in (("missing_rhea_master_ids", "Отсутствующие Rhea master"),
                        ("unresolved_chebi_ids", "Неразрешённые ChEBI")):
         items = rows(unresolved.get(key, []), key)
