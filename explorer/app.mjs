@@ -370,6 +370,7 @@ $("search").addEventListener("input",searchResults);
 $("toggle-table").addEventListener("click",() => {
   tableMode = !tableMode;
   $("table-view").hidden = !tableMode;
+  $("graph").setAttribute("aria-hidden",String(tableMode));
   $("toggle-table").textContent = tableMode ? "Граф" : "Таблица связей";
   $("toggle-table").setAttribute("aria-pressed",String(tableMode));
   if (!tableMode && cy) { cy.resize(); cy.fit(undefined,45); }
